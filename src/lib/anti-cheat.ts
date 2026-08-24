@@ -108,7 +108,7 @@ export function validateScoreSubmission(
     return validateBasketball(input, token, elapsed);
   }
   if (token.gameId === "snake") {
-    return validateSnake(input, elapsed);
+    return validateSnake(input, token, elapsed);
   }
   return { ok: false, error: "未知的游戏类型。" };
 }
@@ -173,9 +173,19 @@ function validateBasketball(
   };
 }
 
-function validateSnake(input: ScoreSubmission, elapsed: number): ValidationResult {
+function validateSnake(
+  input: ScoreSubmission,
+  token: GameTokenPayload,
+  elapsed: number,
+): ValidationResult {
   if (elapsed < SNAKE_MIN_SECONDS || elapsed > SNAKE_MAX_SECONDS) {
     return { ok: false, error: "游戏时长异常，成绩未保存。" };
+  }
+  if (!DIFFICULTIES.includes(input.difficulty as Difficulty)) {
+    return { ok: false, error: "难度参数无效。" };
+  }
+  if (token.difficulty !== input.difficulty) {
+    return { ok: false, error: "难度信息不一致。" };
   }
   const score = input.score;
   if (!Number.isInteger(score) || (score as number) < 0 || (score as number) > MAX_SNAKE_SCORE) {
@@ -190,7 +200,7 @@ function validateSnake(input: ScoreSubmission, elapsed: number): ValidationResul
       madeShots: 0,
       accuracy: null,
       maxStreak: 0,
-      difficulty: null,
+      difficulty: input.difficulty as Difficulty,
     },
   };
 }

@@ -35,7 +35,7 @@ export const GAMES: GameDefinition[] = [
     emoji: "🐍",
     accent: "from-green-500/25 via-green-500/5 to-transparent",
     available: true,
-    difficulty: [],
+    difficulty: ["easy", "normal", "hard"],
   },
   {
     id: "2048",

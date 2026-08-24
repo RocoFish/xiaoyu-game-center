@@ -116,11 +116,9 @@ export function Leaderboard() {
                     命中率
                   </th>
                 )}
-                {isBasketball && (
-                  <th className="hidden px-3 py-3 text-center font-medium md:table-cell sm:px-4">
-                    难度
-                  </th>
-                )}
+                <th className="hidden px-3 py-3 text-center font-medium md:table-cell sm:px-4">
+                  难度
+                </th>
                 <th className="hidden px-3 py-3 text-right font-medium lg:table-cell sm:px-4">
                   日期
                 </th>
@@ -170,11 +168,9 @@ export function Leaderboard() {
                         {formatPercent(e.accuracy ?? 0)}
                       </td>
                     )}
-                    {isBasketball && (
-                      <td className="hidden px-3 py-3 text-center md:table-cell sm:px-4">
-                        {difficultyLabel(e.difficulty)}
-                      </td>
-                    )}
+                    <td className="hidden px-3 py-3 text-center md:table-cell sm:px-4">
+                      {difficultyLabel(e.difficulty)}
+                    </td>
                     <td className="hidden px-3 py-3 text-right text-muted-foreground lg:table-cell sm:px-4">
                       {formatDate(e.played_at)}
                     </td>

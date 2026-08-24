@@ -1,13 +1,31 @@
 // 贪吃蛇纯逻辑引擎：不依赖 DOM，便于测试与复用。
+import type { Difficulty } from "@/types";
 
 export const GRID = 20; // 20×20 网格
 
 export type Direction = "up" | "down" | "left" | "right";
+export type SnakeDifficulty = Difficulty; // easy | normal | hard
 
 export interface Point {
   x: number;
   y: number;
 }
+
+export interface SnakeDifficultyConfig {
+  label: string;
+  baseTickMs: number; // 初始每步间隔
+  speedupPerFood: number; // 每吃一个豆减少的间隔
+  minTickMs: number; // 最快速度上限
+  wrap: boolean; // 撞墙是否穿墙
+}
+
+export const SNAKE_DIFFICULTIES: Record<SnakeDifficulty, SnakeDifficultyConfig> = {
+  easy: { label: "简单", baseTickMs: 200, speedupPerFood: 4, minTickMs: 120, wrap: true },
+  normal: { label: "普通", baseTickMs: 150, speedupPerFood: 5, minTickMs: 80, wrap: false },
+  hard: { label: "困难", baseTickMs: 110, speedupPerFood: 6, minTickMs: 60, wrap: false },
+};
+
+export const SNAKE_DIFFICULTY_ORDER: SnakeDifficulty[] = ["easy", "normal", "hard"];
 
 export interface SnakeState {
   snake: Point[]; // 头在前
@@ -16,6 +34,7 @@ export interface SnakeState {
   nextDir: Direction; // 排队中的方向
   alive: boolean;
   score: number;
+  difficulty: SnakeDifficulty;
 }
 
 const DX: Record<Direction, number> = { up: 0, down: 0, left: -1, right: 1 };
@@ -34,12 +53,13 @@ export function opposite(d: Direction): Direction {
   }
 }
 
-/** 每走一步的间隔（毫秒），随得分加快。 */
-export function tickIntervalMs(score: number): number {
-  return Math.max(70, 160 - score * 5);
+/** 每走一步的间隔（毫秒），随得分加快、按难度不同。 */
+export function tickIntervalMs(score: number, difficulty: SnakeDifficulty): number {
+  const c = SNAKE_DIFFICULTIES[difficulty];
+  return Math.max(c.minTickMs, c.baseTickMs - score * c.speedupPerFood);
 }
 
-export function createGame(): SnakeState {
+export function createGame(difficulty: SnakeDifficulty): SnakeState {
   const mid = Math.floor(GRID / 2);
   return {
     snake: [
@@ -52,6 +72,7 @@ export function createGame(): SnakeState {
     nextDir: "right",
     alive: true,
     score: 0,
+    difficulty,
   };
 }
 
@@ -68,13 +89,21 @@ export function step(s: SnakeState): { ate: boolean } {
   }
 
   const head = s.snake[0];
-  const nx = head.x + DX[s.dir];
-  const ny = head.y + DY[s.dir];
+  let nx = head.x + DX[s.dir];
+  let ny = head.y + DY[s.dir];
 
-  // 撞墙
-  if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) {
-    s.alive = false;
-    return { ate: false };
+  const cfg = SNAKE_DIFFICULTIES[s.difficulty];
+  if (cfg.wrap) {
+    // 简单：穿墙
+    if (nx < 0) nx = GRID - 1;
+    else if (nx >= GRID) nx = 0;
+    if (ny < 0) ny = GRID - 1;
+    else if (ny >= GRID) ny = 0;
+  } else {
+    if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) {
+      s.alive = false;
+      return { ate: false };
+    }
   }
 
   const ate = nx === s.food.x && ny === s.food.y;

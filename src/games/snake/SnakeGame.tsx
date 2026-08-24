@@ -6,11 +6,14 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import {
   GRID,
+  SNAKE_DIFFICULTIES,
+  SNAKE_DIFFICULTY_ORDER,
   createGame,
   queueDirection,
   step,
   tickIntervalMs,
   type Direction,
+  type SnakeDifficulty,
   type SnakeState,
 } from "./engine";
 
@@ -31,9 +34,10 @@ export function SnakeGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sizeRef = useRef({ w: 0, h: 0 });
 
-  const stateRef = useRef<SnakeState>(createGame());
+  const stateRef = useRef<SnakeState>(createGame("normal"));
   const phaseRef = useRef<Phase>("ready");
   const scoreRef = useRef(0);
+  const difficultyRef = useRef<SnakeDifficulty>("normal");
 
   const rafRef = useRef(0);
   const lastTsRef = useRef(0);
@@ -46,6 +50,7 @@ export function SnakeGame() {
   const [phase, setPhaseState] = useState<Phase>("ready");
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(0);
+  const [difficulty, setDifficulty] = useState<SnakeDifficulty>("normal");
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [submitError, setSubmitError] = useState("");
 
@@ -66,11 +71,15 @@ export function SnakeGame() {
     setPhaseState(p);
   }, []);
 
-  const requestToken = useCallback(async () => {
+  const requestToken = useCallback(async (diff: SnakeDifficulty) => {
     tokenRef.current = null;
     if (!userRef.current) return;
     try {
-      const res = await fetch("/api/games/snake/start", { method: "POST" });
+      const res = await fetch("/api/games/snake/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ difficulty: diff }),
+      });
       if (res.ok) {
         const data = await res.json();
         if (data?.token) tokenRef.current = data.token;
@@ -97,7 +106,11 @@ export function SnakeGame() {
       const res = await fetch("/api/scores", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameToken: tokenRef.current, score: scoreRef.current }),
+        body: JSON.stringify({
+          gameToken: tokenRef.current,
+          score: scoreRef.current,
+          difficulty: difficultyRef.current,
+        }),
       });
       const data = await res.json();
       if (res.ok && data?.ok) {
@@ -112,17 +125,22 @@ export function SnakeGame() {
     }
   }, []);
 
-  const startGame = useCallback(() => {
-    stateRef.current = createGame();
-    scoreRef.current = 0;
-    accRef.current = 0;
-    setScore(0);
-    submittedRef.current = false;
-    setSubmitState("idle");
-    setSubmitError("");
-    void requestToken();
-    setPhase("playing");
-  }, [setPhase, requestToken]);
+  const startGame = useCallback(
+    (diff: SnakeDifficulty) => {
+      difficultyRef.current = diff;
+      setDifficulty(diff);
+      stateRef.current = createGame(diff);
+      scoreRef.current = 0;
+      accRef.current = 0;
+      setScore(0);
+      submittedRef.current = false;
+      setSubmitState("idle");
+      setSubmitError("");
+      void requestToken(diff);
+      setPhase("playing");
+    },
+    [setPhase, requestToken],
+  );
 
   const endGame = useCallback(() => {
     setPhase("ended");
@@ -191,12 +209,10 @@ export function SnakeGame() {
       ctx.fillStyle = "#0b0b11";
       ctx.fillRect(0, 0, w, h);
 
-      // 棋盘边框
       ctx.strokeStyle = "rgba(255,255,255,0.12)";
       ctx.lineWidth = 2;
       ctx.strokeRect(ox, oy, cell * GRID, cell * GRID);
 
-      // 网格线
       ctx.strokeStyle = "rgba(255,255,255,0.04)";
       ctx.lineWidth = 1;
       for (let i = 1; i < GRID; i++) {
@@ -255,7 +271,7 @@ export function SnakeGame() {
         const dt = now - lastTsRef.current;
         if (phaseRef.current === "playing") {
           accRef.current += dt;
-          const interval = tickIntervalMs(scoreRef.current);
+          const interval = tickIntervalMs(scoreRef.current, difficultyRef.current);
           while (accRef.current >= interval) {
             accRef.current -= interval;
             const r = step(stateRef.current);
@@ -290,7 +306,9 @@ export function SnakeGame() {
         e.preventDefault();
         togglePause();
       } else if (e.key === "Enter") {
-        if (phaseRef.current === "ready" || phaseRef.current === "ended") startGame();
+        if (phaseRef.current === "ready" || phaseRef.current === "ended") {
+          startGame(difficultyRef.current);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -322,20 +340,10 @@ export function SnakeGame() {
   return (
     <div className="flex flex-col gap-4">
       {/* 顶部数据栏 */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2">
         <Stat label="得分" value={String(score)} highlight />
         <Stat label="本机最高分" value={String(best)} />
-        <div className="hidden items-center justify-end sm:flex">
-          {phase === "playing" && (
-            <button
-              onClick={togglePause}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
-              aria-label="暂停"
-            >
-              <Pause className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+        <Stat label="难度" value={SNAKE_DIFFICULTIES[difficulty].label} />
       </div>
 
       {/* 画布区 */}
@@ -350,13 +358,42 @@ export function SnakeGame() {
           onPointerUp={onPointerUp}
         />
 
+        {phase === "playing" && (
+          <button
+            onClick={togglePause}
+            aria-label="暂停"
+            className="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-black/30 text-zinc-200 transition hover:bg-black/50"
+          >
+            <Pause className="h-4 w-4" />
+          </button>
+        )}
+
         {/* 准备 */}
         {phase === "ready" && (
           <Overlay>
             <h2 className="text-2xl font-bold sm:text-3xl">贪吃蛇</h2>
             <p className="mt-1 text-sm text-zinc-400">吃豆变长，别撞墙、别咬到自己</p>
+            <div className="mt-3 grid w-full max-w-sm grid-cols-3 gap-2">
+              {SNAKE_DIFFICULTY_ORDER.map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDifficulty(d)}
+                  className={cn(
+                    "rounded-xl border px-2 py-3 text-sm font-semibold transition",
+                    difficulty === d
+                      ? "border-green-500 bg-green-500/15 text-green-300"
+                      : "border-white/10 bg-white/5 text-zinc-300 hover:border-white/25",
+                  )}
+                >
+                  {SNAKE_DIFFICULTIES[d].label}
+                  <div className="mt-1 text-[10px] font-normal text-zinc-400">
+                    {SNAKE_DIFFICULTIES[d].wrap ? "可穿墙" : SNAKE_DIFFICULTIES[d].baseTickMs < 130 ? "速度很快" : "撞墙结束"}
+                  </div>
+                </button>
+              ))}
+            </div>
             <button
-              onClick={startGame}
+              onClick={() => startGame(difficulty)}
               className="mt-4 rounded-full bg-green-500 px-10 py-3 font-bold text-black transition hover:bg-green-400"
             >
               开始游戏
@@ -384,7 +421,8 @@ export function SnakeGame() {
             <h2 className="text-xl font-bold text-zinc-300">游戏结束</h2>
             <div className="mt-1 text-5xl font-black text-green-400">{score}</div>
             <div className="text-sm text-zinc-400">
-              本机最高分：<span className="font-semibold text-zinc-200">{best}</span>
+              难度：{SNAKE_DIFFICULTIES[difficulty].label} · 本机最高分：
+              <span className="font-semibold text-zinc-200">{best}</span>
             </div>
             <div className="mt-2 h-6 text-sm">
               {submitState === "saving" && <span className="text-zinc-400">正在保存成绩…</span>}
@@ -392,12 +430,20 @@ export function SnakeGame() {
               {submitState === "error" && <span className="text-red-400">{submitError}</span>}
               {submitState === "need-login" && <span className="text-zinc-400">登录后即可保存成绩</span>}
             </div>
-            <button
-              onClick={startGame}
-              className="mt-4 rounded-full bg-green-500 px-10 py-3 font-bold text-black transition hover:bg-green-400"
-            >
-              再来一局
-            </button>
+            <div className="mt-2 flex gap-3">
+              <button
+                onClick={() => startGame(difficulty)}
+                className="rounded-full bg-green-500 px-8 py-3 font-bold text-black transition hover:bg-green-400"
+              >
+                再来一局
+              </button>
+              <button
+                onClick={() => setPhase("ready")}
+                className="rounded-full border border-white/15 px-6 py-3 font-semibold text-zinc-200 transition hover:bg-white/5"
+              >
+                换难度
+              </button>
+            </div>
           </Overlay>
         )}
       </div>
