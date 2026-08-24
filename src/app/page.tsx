@@ -19,9 +19,9 @@ export default function Home() {
           简单好玩的在线小游戏合集，刷新全球排行榜！
         </p>
         <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-          <Link href="/games/basketball" className={buttonVariants({ size: "lg" })}>
-            🏀 开始游戏
-          </Link>
+          <a href="#games" className={buttonVariants({ size: "lg" })}>
+            🎮 选择游戏
+          </a>
           <Link
             href="/leaderboard"
             className={buttonVariants({ variant: "outline", size: "lg" })}
@@ -31,8 +31,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 游戏列表 */}
-      <section className="mt-14">
+      {/* 游戏选择区 */}
+      <section id="games" className="mt-14 scroll-mt-16">
         <div className="flex items-end justify-between">
           <h2 className="text-xl font-bold sm:text-2xl">游戏</h2>
           <span className="text-sm text-muted-foreground">更多小游戏持续上新</span>
