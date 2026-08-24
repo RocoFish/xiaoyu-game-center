@@ -124,7 +124,7 @@ function validateBasketball(
   if (token.difficulty !== input.difficulty) {
     return { ok: false, error: "难度信息不一致。" };
   }
-  if (elapsed < BASKETBALL_MIN_SECONDS || elapsed > BASKETBALL_MAX_SECONDS) {
+  if (elapsed > BASKETBALL_MAX_SECONDS) {
     return { ok: false, error: "游戏时长异常，成绩未保存。" };
   }
 
@@ -178,7 +178,7 @@ function validateSnake(
   token: GameTokenPayload,
   elapsed: number,
 ): ValidationResult {
-  if (elapsed < SNAKE_MIN_SECONDS || elapsed > SNAKE_MAX_SECONDS) {
+  if (elapsed > SNAKE_MAX_SECONDS) {
     return { ok: false, error: "游戏时长异常，成绩未保存。" };
   }
   if (!DIFFICULTIES.includes(input.difficulty as Difficulty)) {
