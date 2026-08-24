@@ -5,7 +5,14 @@ import { getSupabaseBrowser } from "@/lib/supabase/client";
 import type { LeaderboardEntry } from "@/types";
 
 export type LeaderboardPeriod = "today" | "week" | "all";
-export type LeaderboardGame = "basketball" | "snake";
+export type LeaderboardGame =
+  | "basketball"
+  | "snake"
+  | "2048"
+  | "memory"
+  | "pong"
+  | "reaction"
+  | "racing";
 
 function periodStart(period: LeaderboardPeriod): Date | null {
   if (period === "all") return null;

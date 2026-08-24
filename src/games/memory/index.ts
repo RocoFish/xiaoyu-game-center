@@ -1,0 +1,1 @@
+export { GameMemory } from "./MemoryGame";

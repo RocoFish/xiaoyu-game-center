@@ -17,7 +17,24 @@ export const MAX_SNAKE_SCORE = 400; // 20×20 棋盘的理论最大值
 export const SNAKE_MIN_SECONDS = 5;
 export const SNAKE_MAX_SECONDS = 7200; // 2 小时
 
-export type GameId = "basketball" | "snake";
+export type GameId = "basketball" | "snake" | "2048" | "memory" | "pong" | "reaction" | "racing";
+
+export const GAME_IDS: GameId[] = ["basketball", "snake", "2048", "memory", "pong", "reaction", "racing"];
+
+// 仅含「分数」的游戏（没有投篮相关字段 / 难度）
+export const SCORE_ONLY_GAMES: GameId[] = ["2048", "memory", "pong", "reaction", "racing"];
+
+// 各分数游戏的得分上限
+export const MAX_SCORE: Record<string, number> = {
+  snake: 400,
+  "2048": 100000,
+  memory: 400,
+  pong: 100,
+  reaction: 1000,
+  racing: 100000,
+};
+
+export const GAME_MAX_SECONDS = 4 * 3600; // 分数类游戏时长上限 4 小时
 
 interface GameTokenPayload {
   gameId: GameId;
@@ -110,6 +127,9 @@ export function validateScoreSubmission(
   if (token.gameId === "snake") {
     return validateSnake(input, token, elapsed);
   }
+  if (SCORE_ONLY_GAMES.includes(token.gameId)) {
+    return validateScoreGame(input, token, elapsed);
+  }
   return { ok: false, error: "未知的游戏类型。" };
 }
 
@@ -201,6 +221,33 @@ function validateSnake(
       accuracy: null,
       maxStreak: 0,
       difficulty: input.difficulty as Difficulty,
+    },
+  };
+}
+
+function validateScoreGame(
+  input: ScoreSubmission,
+  token: GameTokenPayload,
+  elapsed: number,
+): ValidationResult {
+  if (elapsed > GAME_MAX_SECONDS) {
+    return { ok: false, error: "游戏时长异常，成绩未保存。" };
+  }
+  const score = input.score;
+  const max = MAX_SCORE[token.gameId] ?? 100000;
+  if (!Number.isInteger(score) || (score as number) < 0 || (score as number) > max) {
+    return { ok: false, error: "得分数据异常。" };
+  }
+  return {
+    ok: true,
+    data: {
+      gameId: token.gameId,
+      score: score as number,
+      shots: 0,
+      madeShots: 0,
+      accuracy: null,
+      maxStreak: 0,
+      difficulty: null,
     },
   };
 }

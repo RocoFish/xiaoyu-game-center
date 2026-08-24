@@ -26,8 +26,13 @@ const PERIODS: { key: LeaderboardPeriod; label: string }[] = [
 ];
 
 const GAMES: { key: LeaderboardGame; label: string }[] = [
-  { key: "basketball", label: "🏀 投篮挑战" },
+  { key: "basketball", label: "🏀 投篮" },
   { key: "snake", label: "🐍 贪吃蛇" },
+  { key: "2048", label: "🔢 2048" },
+  { key: "memory", label: "🃏 记忆" },
+  { key: "pong", label: "🏓 Pong" },
+  { key: "reaction", label: "⚡ 反应" },
+  { key: "racing", label: "🏎️ 赛车" },
 ];
 
 export function Leaderboard() {
@@ -36,12 +41,13 @@ export function Leaderboard() {
   const [game, setGame] = useState<LeaderboardGame>("basketball");
   const { entries, myRank, loading, error } = useLeaderboard(period, game, user?.id);
 
-  const isBasketball = game === "basketball";
+  const showAccuracy = game === "basketball";
+  const showDifficulty = game === "basketball" || game === "snake";
 
   return (
     <div className="space-y-4">
       {/* 游戏切换 */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {GAMES.map((g) => (
           <button
             key={g.key}
@@ -101,7 +107,7 @@ export function Leaderboard() {
         </div>
       ) : entries.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-4 py-16 text-center text-muted-foreground">
-          暂无记录，快来抢占榜首！{game === "basketball" ? "🏀" : "🐍"}
+          暂无记录，快来抢占榜首！{game === "basketball" ? "🏀" : game === "snake" ? "🐍" : "🎮"}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -111,14 +117,16 @@ export function Leaderboard() {
                 <th className="px-3 py-3 font-medium sm:px-4">排名</th>
                 <th className="px-3 py-3 font-medium sm:px-4">玩家</th>
                 <th className="px-3 py-3 text-right font-medium sm:px-4">分数</th>
-                {isBasketball && (
+                {showAccuracy && (
                   <th className="hidden px-3 py-3 text-right font-medium sm:table-cell sm:px-4">
                     命中率
                   </th>
                 )}
-                <th className="hidden px-3 py-3 text-center font-medium md:table-cell sm:px-4">
-                  难度
-                </th>
+                {showDifficulty && (
+                  <th className="hidden px-3 py-3 text-center font-medium md:table-cell sm:px-4">
+                    难度
+                  </th>
+                )}
                 <th className="hidden px-3 py-3 text-right font-medium lg:table-cell sm:px-4">
                   日期
                 </th>
@@ -163,14 +171,16 @@ export function Leaderboard() {
                     <td className="px-3 py-3 text-right text-base font-bold sm:px-4">
                       {e.score}
                     </td>
-                    {isBasketball && (
+                    {showAccuracy && (
                       <td className="hidden px-3 py-3 text-right sm:table-cell sm:px-4">
                         {formatPercent(e.accuracy ?? 0)}
                       </td>
                     )}
-                    <td className="hidden px-3 py-3 text-center md:table-cell sm:px-4">
-                      {difficultyLabel(e.difficulty)}
-                    </td>
+                    {showDifficulty && (
+                      <td className="hidden px-3 py-3 text-center md:table-cell sm:px-4">
+                        {difficultyLabel(e.difficulty)}
+                      </td>
+                    )}
                     <td className="hidden px-3 py-3 text-right text-muted-foreground lg:table-cell sm:px-4">
                       {formatDate(e.played_at)}
                     </td>
