@@ -97,3 +97,9 @@ npm run build    # 生产构建
 npm run start    # 运行生产构建
 npm run lint     # ESLint 检查
 ```
+
+## 许可
+
+本项目**源码仅供查看**，采用「保留所有权利」（All Rights Reserved），参见 [LICENSE](./LICENSE)。
+
+未经版权所有者书面许可，任何人不得复制、修改、分发、再授权、出售或用于任何商业用途。如需合作、使用或引用本项目，请联系作者。
