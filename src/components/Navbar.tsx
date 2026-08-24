@@ -12,6 +12,7 @@ import { cn, displayName } from "@/lib/utils";
 const NAV_LINKS = [
   { href: "/", label: "首页" },
   { href: "/leaderboard", label: "排行榜" },
+  { href: "/chat", label: "聊天" },
 ];
 
 export function Navbar() {
