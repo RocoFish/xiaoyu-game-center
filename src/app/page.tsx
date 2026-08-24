@@ -16,7 +16,7 @@ export default function Home() {
           小鱼 Game Center
         </h1>
         <p className="mx-auto mt-3 max-w-md text-base text-muted-foreground sm:text-lg">
-          简单好玩的在线小游戏合集。投篮挑战等你来战，刷新全球排行榜！
+          简单好玩的在线小游戏合集，刷新全球排行榜！
         </p>
         <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
           <Link href="/games/basketball" className={buttonVariants({ size: "lg" })}>
