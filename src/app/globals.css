@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* 浅色模式（默认）与深色模式（.dark）的语义化颜色变量 */
+:root {
+  --background: #fafafa;
+  --foreground: #171717;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --border: rgba(0, 0, 0, 0.08);
+  --muted: #f4f4f5;
+  --muted-foreground: #52525b;
+  --primary: #ea580c;
+  --primary-foreground: #ffffff;
+  --ring: #f97316;
+}
+
+.dark {
+  --background: #0a0a0f;
+  --foreground: #ededed;
+  --card: #131318;
+  --card-foreground: #ededed;
+  --border: rgba(255, 255, 255, 0.1);
+  --muted: #1a1a22;
+  --muted-foreground: #a1a1aa;
+  --primary: #f97316;
+  --primary-foreground: #0a0a0a;
+  --ring: #f97316;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* 得分 / 连击反馈 */
+@keyframes feedback-pop {
+  0% {
+    transform: translate(-50%, 0) scale(0.6);
+    opacity: 0;
+  }
+  20% {
+    transform: translate(-50%, -8px) scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -32px) scale(1);
+    opacity: 0;
+  }
+}
+.animate-feedback {
+  animation: feedback-pop 0.9s ease-out forwards;
+}
+
+/* 倒计时数字 */
+@keyframes countdown-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  40% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.animate-countdown {
+  animation: countdown-pop 0.4s ease-out;
+}
+
+/* 页面淡入上移 */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out both;
+}
