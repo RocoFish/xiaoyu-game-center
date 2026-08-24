@@ -6,11 +6,18 @@ import { Trophy } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useLeaderboard,
+  type LeaderboardGame,
   type LeaderboardPeriod,
 } from "@/hooks/useLeaderboard";
 import { Avatar } from "@/components/Avatar";
 import { Spinner } from "@/components/ui/Spinner";
-import { cn, DIFFICULTY_LABEL, displayName, formatDate, formatPercent } from "@/lib/utils";
+import {
+  cn,
+  difficultyLabel,
+  displayName,
+  formatDate,
+  formatPercent,
+} from "@/lib/utils";
 
 const PERIODS: { key: LeaderboardPeriod; label: string }[] = [
   { key: "today", label: "今日" },
@@ -18,13 +25,39 @@ const PERIODS: { key: LeaderboardPeriod; label: string }[] = [
   { key: "all", label: "历史" },
 ];
 
+const GAMES: { key: LeaderboardGame; label: string }[] = [
+  { key: "basketball", label: "🏀 投篮挑战" },
+  { key: "snake", label: "🐍 贪吃蛇" },
+];
+
 export function Leaderboard() {
   const { user } = useAuth();
   const [period, setPeriod] = useState<LeaderboardPeriod>("today");
-  const { entries, myRank, loading, error } = useLeaderboard(period, user?.id);
+  const [game, setGame] = useState<LeaderboardGame>("basketball");
+  const { entries, myRank, loading, error } = useLeaderboard(period, game, user?.id);
+
+  const isBasketball = game === "basketball";
 
   return (
     <div className="space-y-4">
+      {/* 游戏切换 */}
+      <div className="flex gap-2">
+        {GAMES.map((g) => (
+          <button
+            key={g.key}
+            onClick={() => setGame(g.key)}
+            className={cn(
+              "rounded-full px-4 py-1.5 text-sm font-semibold transition",
+              game === g.key
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {g.label}
+          </button>
+        ))}
+      </div>
+
       {/* 周期切换 */}
       <div className="flex gap-2">
         {PERIODS.map((p) => (
@@ -68,7 +101,7 @@ export function Leaderboard() {
         </div>
       ) : entries.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-4 py-16 text-center text-muted-foreground">
-          暂无记录，快来抢占榜首！🏀
+          暂无记录，快来抢占榜首！{game === "basketball" ? "🏀" : "🐍"}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -78,12 +111,16 @@ export function Leaderboard() {
                 <th className="px-3 py-3 font-medium sm:px-4">排名</th>
                 <th className="px-3 py-3 font-medium sm:px-4">玩家</th>
                 <th className="px-3 py-3 text-right font-medium sm:px-4">分数</th>
-                <th className="hidden px-3 py-3 text-right font-medium sm:table-cell sm:px-4">
-                  命中率
-                </th>
-                <th className="hidden px-3 py-3 text-center font-medium md:table-cell sm:px-4">
-                  难度
-                </th>
+                {isBasketball && (
+                  <th className="hidden px-3 py-3 text-right font-medium sm:table-cell sm:px-4">
+                    命中率
+                  </th>
+                )}
+                {isBasketball && (
+                  <th className="hidden px-3 py-3 text-center font-medium md:table-cell sm:px-4">
+                    难度
+                  </th>
+                )}
                 <th className="hidden px-3 py-3 text-right font-medium lg:table-cell sm:px-4">
                   日期
                 </th>
@@ -128,12 +165,16 @@ export function Leaderboard() {
                     <td className="px-3 py-3 text-right text-base font-bold sm:px-4">
                       {e.score}
                     </td>
-                    <td className="hidden px-3 py-3 text-right sm:table-cell sm:px-4">
-                      {formatPercent(e.accuracy ?? 0)}
-                    </td>
-                    <td className="hidden px-3 py-3 text-center md:table-cell sm:px-4">
-                      {DIFFICULTY_LABEL[e.difficulty]}
-                    </td>
+                    {isBasketball && (
+                      <td className="hidden px-3 py-3 text-right sm:table-cell sm:px-4">
+                        {formatPercent(e.accuracy ?? 0)}
+                      </td>
+                    )}
+                    {isBasketball && (
+                      <td className="hidden px-3 py-3 text-center md:table-cell sm:px-4">
+                        {difficultyLabel(e.difficulty)}
+                      </td>
+                    )}
                     <td className="hidden px-3 py-3 text-right text-muted-foreground lg:table-cell sm:px-4">
                       {formatDate(e.played_at)}
                     </td>

@@ -7,9 +7,10 @@ import { usePlayerStats } from "@/hooks/usePlayerStats";
 import { Spinner } from "@/components/ui/Spinner";
 import { buttonVariants } from "@/components/ui/Button";
 import {
-  DIFFICULTY_LABEL,
+  difficultyLabel,
   formatDateTime,
   formatPercent,
+  gameTitle,
 } from "@/lib/utils";
 
 export default function MyScoresPage() {
@@ -63,6 +64,7 @@ export default function MyScoresPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="px-4 py-3 font-medium">游戏</th>
                   <th className="px-4 py-3 font-medium">分数</th>
                   <th className="px-4 py-3 font-medium">投篮</th>
                   <th className="px-4 py-3 font-medium">命中</th>
@@ -75,12 +77,13 @@ export default function MyScoresPage() {
               <tbody>
                 {games.map((g) => (
                   <tr key={g.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-2.5 text-muted-foreground">{gameTitle(g.game_id)}</td>
                     <td className="px-4 py-2.5 font-bold">{g.score}</td>
                     <td className="px-4 py-2.5">{g.shots}</td>
                     <td className="px-4 py-2.5">{g.made_shots}</td>
                     <td className="px-4 py-2.5">{formatPercent(g.accuracy ?? 0)}</td>
                     <td className="px-4 py-2.5">{g.max_streak}</td>
-                    <td className="px-4 py-2.5">{DIFFICULTY_LABEL[g.difficulty]}</td>
+                    <td className="px-4 py-2.5">{difficultyLabel(g.difficulty)}</td>
                     <td className="px-4 py-2.5 text-right text-muted-foreground">
                       {formatDateTime(g.played_at)}
                     </td>

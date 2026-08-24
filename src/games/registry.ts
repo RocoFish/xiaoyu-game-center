@@ -31,10 +31,10 @@ export const GAMES: GameDefinition[] = [
     id: "snake",
     title: "贪吃蛇",
     slug: "snake",
-    description: "经典贪吃蛇，敬请期待。",
+    description: "经典贪吃蛇，吃豆变长，挑战更高分！",
     emoji: "🐍",
     accent: "from-green-500/25 via-green-500/5 to-transparent",
-    available: false,
+    available: true,
     difficulty: [],
   },
   {

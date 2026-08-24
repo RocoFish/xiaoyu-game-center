@@ -13,6 +13,20 @@ export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   hard: "困难",
 };
 
+export const GAME_TITLE: Record<string, string> = {
+  basketball: "投篮挑战",
+  snake: "贪吃蛇",
+};
+
+export function gameTitle(gameId: string): string {
+  return GAME_TITLE[gameId] ?? gameId;
+}
+
+export function difficultyLabel(d: Difficulty | null | undefined): string {
+  if (!d) return "-";
+  return DIFFICULTY_LABEL[d];
+}
+
 /** 命中率显示，例如 0.666 -> "67%"。 */
 export function formatPercent(ratio: number): string {
   if (!Number.isFinite(ratio) || ratio <= 0) return "0%";

@@ -5,6 +5,7 @@ import { getSupabaseBrowser } from "@/lib/supabase/client";
 import type { LeaderboardEntry } from "@/types";
 
 export type LeaderboardPeriod = "today" | "week" | "all";
+export type LeaderboardGame = "basketball" | "snake";
 
 function periodStart(period: LeaderboardPeriod): Date | null {
   if (period === "all") return null;
@@ -35,7 +36,11 @@ function dedupeAndRank(raw: LeaderboardEntry[]): LeaderboardEntry[] {
   return sorted.map((e, i) => ({ ...e, rank: i + 1 }));
 }
 
-export function useLeaderboard(period: LeaderboardPeriod, userId?: string | null) {
+export function useLeaderboard(
+  period: LeaderboardPeriod,
+  gameId: LeaderboardGame,
+  userId?: string | null,
+) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [myRank, setMyRank] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,6 +54,7 @@ export function useLeaderboard(period: LeaderboardPeriod, userId?: string | null
       let query = supabase
         .from("game_scores")
         .select("*, profiles(username, avatar_url)")
+        .eq("game_id", gameId)
         .order("score", { ascending: false })
         .limit(500);
 
@@ -72,7 +78,7 @@ export function useLeaderboard(period: LeaderboardPeriod, userId?: string | null
     } finally {
       setLoading(false);
     }
-  }, [period, userId]);
+  }, [period, gameId, userId]);
 
   useEffect(() => {
     void load();

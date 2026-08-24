@@ -18,7 +18,7 @@ export interface GameScore {
   made_shots: number;
   accuracy: number | null;
   max_streak: number;
-  difficulty: Difficulty;
+  difficulty: Difficulty | null;
   played_at: string;
 }
 

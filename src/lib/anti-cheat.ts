@@ -1,23 +1,28 @@
 // 服务端防作弊工具，仅可被 API 路由引用（不要在前端 bundle 中引入）。
-// 设计原则：不信任客户端提交的 score；score 由服务端根据 made_shots 重新计算。
+// 设计原则：不信任客户端提交的 score；score 由服务端根据游戏规则重新计算或校验。
 import { createHmac, timingSafeEqual } from "crypto";
 import type { Difficulty } from "@/types";
 
-export const GAME_DURATION_SECONDS = 60;
 export const SCORE_PER_SHOT = 2;
-
-// 一局 60 秒，理论极限约 1 秒/球；此处留足冗余、仅拦截明显异常值。
-export const MAX_SHOTS = 120;
-export const MAX_STREAK = 120;
-export const MIN_GAME_SECONDS = 45;
-export const MAX_GAME_SECONDS = 90;
-
 export const DIFFICULTIES: Difficulty[] = ["easy", "normal", "hard"];
 
+// 投篮挑战
+export const MAX_SHOTS = 120;
+export const MAX_STREAK = 120;
+export const BASKETBALL_MIN_SECONDS = 45;
+export const BASKETBALL_MAX_SECONDS = 90;
+
+// 贪吃蛇
+export const MAX_SNAKE_SCORE = 400; // 20×20 棋盘的理论最大值
+export const SNAKE_MIN_SECONDS = 5;
+export const SNAKE_MAX_SECONDS = 7200; // 2 小时
+
+export type GameId = "basketball" | "snake";
+
 interface GameTokenPayload {
-  gameId: string;
-  difficulty: Difficulty;
+  gameId: GameId;
   startedAt: number; // epoch 毫秒
+  difficulty?: Difficulty;
 }
 
 function secret(): string {
@@ -26,7 +31,7 @@ function secret(): string {
   return s;
 }
 
-/** 开始游戏时签发一个带签名的令牌，记录开始时间，用于提交时校验真实游戏时长。 */
+/** 开始游戏时签发带签名的令牌，记录开始时间。 */
 export function signGameToken(payload: GameTokenPayload): string {
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const sig = createHmac("sha256", secret()).update(body).digest("base64url");
@@ -55,11 +60,7 @@ export function verifyGameToken(token: string): GameTokenPayload | null {
     const parsed = JSON.parse(
       Buffer.from(body, "base64url").toString("utf8"),
     ) as GameTokenPayload;
-    if (
-      typeof parsed.gameId !== "string" ||
-      typeof parsed.difficulty !== "string" ||
-      typeof parsed.startedAt !== "number"
-    ) {
+    if (typeof parsed.gameId !== "string" || typeof parsed.startedAt !== "number") {
       return null;
     }
     return parsed;
@@ -70,54 +71,66 @@ export function verifyGameToken(token: string): GameTokenPayload | null {
 
 export interface ScoreSubmission {
   gameToken: string;
+  // 投篮挑战
+  shots?: number;
+  madeShots?: number;
+  maxStreak?: number;
+  difficulty?: Difficulty;
+  // 贪吃蛇
+  score?: number;
+}
+
+export interface NormalizedScore {
+  gameId: GameId;
+  score: number;
   shots: number;
   madeShots: number;
+  accuracy: number | null;
   maxStreak: number;
-  difficulty: Difficulty;
+  difficulty: Difficulty | null;
 }
 
 export type ValidationResult =
-  | {
-      ok: true;
-      data: {
-        score: number;
-        shots: number;
-        madeShots: number;
-        accuracy: number;
-        maxStreak: number;
-        difficulty: Difficulty;
-      };
-    }
+  | { ok: true; data: NormalizedScore }
   | { ok: false; error: string };
 
-/**
- * 校验一次成绩提交。返回归一化后的数据，score 由此处重新计算。
- * 这是第一版防作弊边界；更彻底的方案（服务端校验整局 replay/遥测）在此预留扩展：
- * 后续可在游戏 token 中附带“投篮事件遥测流”，由服务端重放物理模拟来确认每一球。
- */
+/** 校验一次成绩提交，按令牌中的 gameId 分派到对应规则。 */
 export function validateScoreSubmission(
   input: ScoreSubmission,
   now = Date.now(),
 ): ValidationResult {
   const token = verifyGameToken(input.gameToken);
   if (!token) return { ok: false, error: "游戏凭证无效，请重新开始游戏。" };
-  if (token.gameId !== "basketball") {
-    return { ok: false, error: "游戏凭证无效。" };
-  }
 
-  if (!DIFFICULTIES.includes(input.difficulty)) {
+  const elapsed = (now - token.startedAt) / 1000;
+
+  if (token.gameId === "basketball") {
+    return validateBasketball(input, token, elapsed);
+  }
+  if (token.gameId === "snake") {
+    return validateSnake(input, elapsed);
+  }
+  return { ok: false, error: "未知的游戏类型。" };
+}
+
+function validateBasketball(
+  input: ScoreSubmission,
+  token: GameTokenPayload,
+  elapsed: number,
+): ValidationResult {
+  if (!DIFFICULTIES.includes(input.difficulty as Difficulty)) {
     return { ok: false, error: "难度参数无效。" };
   }
   if (token.difficulty !== input.difficulty) {
     return { ok: false, error: "难度信息不一致。" };
   }
-
-  const elapsed = (now - token.startedAt) / 1000;
-  if (elapsed < MIN_GAME_SECONDS || elapsed > MAX_GAME_SECONDS) {
+  if (elapsed < BASKETBALL_MIN_SECONDS || elapsed > BASKETBALL_MAX_SECONDS) {
     return { ok: false, error: "游戏时长异常，成绩未保存。" };
   }
 
-  const { shots, madeShots, maxStreak } = input;
+  const shots = input.shots;
+  const madeShots = input.madeShots;
+  const maxStreak = input.maxStreak;
   if (
     !Number.isInteger(shots) ||
     !Number.isInteger(madeShots) ||
@@ -125,34 +138,59 @@ export function validateScoreSubmission(
   ) {
     return { ok: false, error: "成绩数据格式异常。" };
   }
-  if (shots < 0 || madeShots < 0 || maxStreak < 0) {
+  if ((shots as number) < 0 || (madeShots as number) < 0 || (maxStreak as number) < 0) {
     return { ok: false, error: "成绩数据异常。" };
   }
-  if (shots > MAX_SHOTS) {
+  if ((shots as number) > MAX_SHOTS) {
     return { ok: false, error: "投篮次数超出合理范围。" };
   }
-  if (madeShots > shots) {
+  if ((madeShots as number) > (shots as number)) {
     return { ok: false, error: "命中次数不能大于投篮次数。" };
   }
-  if (maxStreak > madeShots) {
+  if ((maxStreak as number) > (madeShots as number)) {
     return { ok: false, error: "连中次数异常。" };
   }
-  if (maxStreak > MAX_STREAK) {
+  if ((maxStreak as number) > MAX_STREAK) {
     return { ok: false, error: "连中次数超出合理范围。" };
   }
 
-  const accuracy = shots > 0 ? Math.round((madeShots / shots) * 10000) / 10000 : 0;
-  const score = madeShots * SCORE_PER_SHOT;
+  const s = shots as number;
+  const m = madeShots as number;
+  const accuracy = s > 0 ? Math.round((m / s) * 10000) / 10000 : 0;
+  const score = m * SCORE_PER_SHOT;
 
   return {
     ok: true,
     data: {
+      gameId: "basketball",
       score,
-      shots,
-      madeShots,
+      shots: s,
+      madeShots: m,
       accuracy,
-      maxStreak,
-      difficulty: input.difficulty,
+      maxStreak: maxStreak as number,
+      difficulty: input.difficulty as Difficulty,
+    },
+  };
+}
+
+function validateSnake(input: ScoreSubmission, elapsed: number): ValidationResult {
+  if (elapsed < SNAKE_MIN_SECONDS || elapsed > SNAKE_MAX_SECONDS) {
+    return { ok: false, error: "游戏时长异常，成绩未保存。" };
+  }
+  const score = input.score;
+  if (!Number.isInteger(score) || (score as number) < 0 || (score as number) > MAX_SNAKE_SCORE) {
+    return { ok: false, error: "得分数据异常。" };
+  }
+  return {
+    ok: true,
+    data: {
+      gameId: "snake",
+      score: score as number,
+      shots: 0,
+      madeShots: 0,
+      accuracy: null,
+      maxStreak: 0,
+      difficulty: null,
     },
   };
 }

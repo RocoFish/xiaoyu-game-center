@@ -14,10 +14,11 @@ import { Label } from "@/components/ui/Label";
 import { Spinner } from "@/components/ui/Spinner";
 import { Card } from "@/components/ui/Card";
 import {
-  DIFFICULTY_LABEL,
+  difficultyLabel,
   displayName,
   formatDateTime,
   formatPercent,
+  gameTitle,
 } from "@/lib/utils";
 
 export default function ProfilePage() {
@@ -192,6 +193,7 @@ export default function ProfilePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-muted-foreground">
+                <th className="px-4 py-2.5 font-medium">游戏</th>
                 <th className="px-4 py-2.5 font-medium">分数</th>
                 <th className="px-4 py-2.5 font-medium">命中率</th>
                 <th className="px-4 py-2.5 font-medium">连中</th>
@@ -202,10 +204,11 @@ export default function ProfilePage() {
             <tbody>
               {recent.map((g) => (
                 <tr key={g.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2.5 text-muted-foreground">{gameTitle(g.game_id)}</td>
                   <td className="px-4 py-2.5 font-bold">{g.score}</td>
                   <td className="px-4 py-2.5">{formatPercent(g.accuracy ?? 0)}</td>
                   <td className="px-4 py-2.5">{g.max_streak}</td>
-                  <td className="hidden px-4 py-2.5 sm:table-cell">{DIFFICULTY_LABEL[g.difficulty]}</td>
+                  <td className="hidden px-4 py-2.5 sm:table-cell">{difficultyLabel(g.difficulty)}</td>
                   <td className="hidden px-4 py-2.5 text-right text-muted-foreground sm:table-cell">
                     {formatDateTime(g.played_at)}
                   </td>

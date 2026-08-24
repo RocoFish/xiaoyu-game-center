@@ -7,6 +7,9 @@ import {
 
 export const runtime = "nodejs";
 
+// 单个用户 120 秒内的最大提交次数（防刷分）。
+const MAX_SUBMISSIONS_PER_2MIN = 10;
+
 export async function POST(req: Request) {
   try {
     const supabase = await createSupabaseServer();
@@ -19,13 +22,13 @@ export async function POST(req: Request) {
 
     const body = (await req.json().catch(() => ({}))) as ScoreSubmission;
 
-    // 服务端校验（含令牌签名 / 真实游戏时长 / 数值范围 / 命中数 ≤ 投篮数）。
+    // 服务端校验（令牌签名 / 真实时长 / 数值范围）。
     const result = validateScoreSubmission(body);
     if (!result.ok) {
       return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
     }
 
-    // 限流：最近 120 秒内同一用户的提交次数。
+    // 限流
     const since = new Date(Date.now() - 120_000).toISOString();
     const { count, error: countErr } = await supabase
       .from("game_scores")
@@ -38,18 +41,18 @@ export async function POST(req: Request) {
         { status: 500 },
       );
     }
-    if ((count ?? 0) >= 3) {
+    if ((count ?? 0) >= MAX_SUBMISSIONS_PER_2MIN) {
       return NextResponse.json(
         { ok: false, error: "提交过于频繁，请稍后再试。" },
         { status: 429 },
       );
     }
 
-    const { score, shots, madeShots, accuracy, maxStreak, difficulty } = result.data;
+    const { gameId, score, shots, madeShots, accuracy, maxStreak, difficulty } = result.data;
 
     const { error: insertErr } = await supabase.from("game_scores").insert({
       user_id: user.id,
-      game_id: "basketball",
+      game_id: gameId,
       score,
       shots,
       made_shots: madeShots,
