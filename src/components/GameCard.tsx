@@ -1,8 +1,13 @@
+"use client";
+
 import Link from "next/link";
 import type { GameDefinition } from "@/games/registry";
-import { cn, DIFFICULTY_LABEL } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 export function GameCard({ game }: { game: GameDefinition }) {
+  const { t } = useLang();
+
   const inner = (
     <>
       <div
@@ -15,18 +20,18 @@ export function GameCard({ game }: { game: GameDefinition }) {
       </div>
       <div className="mt-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold">{game.title}</h3>
+          <h3 className="text-base font-bold">{t(`game.${game.id}.title`)}</h3>
           {game.available ? (
             <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary">
-              可玩
+              {t("home.available")}
             </span>
           ) : (
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">
-              敬请期待
+              {t("home.comingSoon")}
             </span>
           )}
         </div>
-        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{game.description}</p>
+        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{t(`game.${game.id}.desc`)}</p>
         {game.available && game.difficulty.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {game.difficulty.map((d) => (
@@ -34,7 +39,7 @@ export function GameCard({ game }: { game: GameDefinition }) {
                 key={d}
                 className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
               >
-                {DIFFICULTY_LABEL[d]}
+                {t(`diff.${d}`)}
               </span>
             ))}
           </div>

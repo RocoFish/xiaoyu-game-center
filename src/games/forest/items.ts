@@ -27,6 +27,10 @@ export const ITEMS: ItemDef[] = [
   { id: "puffer", name: "气鼓鼓", icon: "🐡", rarity: "common", description: "你一碰它，它就鼓起来了。" },
   { id: "goldfish", name: "小金鱼", icon: "🧡", rarity: "rare", description: "金色的，闪亮亮的。" },
   { id: "glowfish", name: "发光鱼", icon: "✨", rarity: "rare", description: "夜里看它，自己也亮了起来。" },
+  { id: "clover", name: "四叶草", icon: "🍀", rarity: "common", description: "据说找到它的人会走运。" },
+  { id: "shell", name: "河贝", icon: "🐚", rarity: "common", description: "被河水冲得圆圆的，凉凉的。" },
+  { id: "jade", name: "青玉", icon: "💎", rarity: "rare", description: "被河水冲得温润的青玉。" },
+  { id: "pearl", name: "河珍珠", icon: "🫧", rarity: "rare", description: "月亮见过它，它见过月亮。" },
 ];
 
 export const ITEM_MAP: Record<string, ItemDef> = Object.fromEntries(

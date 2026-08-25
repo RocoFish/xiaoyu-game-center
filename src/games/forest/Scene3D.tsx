@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { MAP_W, MAP_H, TILE, TYPES, RIVER_X, HUT_CENTER, type World, type WorldItem } from "./engine";
+import { MAP_W, MAP_H, TILE, TYPES, RIVER_X, RIVER_COL, HUT_CENTER, type World, type WorldItem } from "./engine";
 import { getItem } from "./items";
 
 export interface MysteryMarker {
@@ -33,6 +33,8 @@ interface SceneProps {
   onVendingMachine: () => void;
   /** 点击床铺休息。 */
   onBed: () => void;
+  /** 点击门离开小屋。 */
+  onLeave: () => void;
 }
 
 const DAY_CYCLE = 240;
@@ -58,22 +60,75 @@ function seededRandom(seed: number) {
 
 // ---- 低多边形元素 ----
 
-function Tree({ x, z }: { x: number; z: number }) {
+const TREE_GREENS = ["#3fa34d", "#4caf50", "#66bb6a", "#2f8f46"];
+
+function Tree({ x, z, seed }: { x: number; z: number; seed: number }) {
+  const rnd = useMemo(() => seededRandom(seed), [seed]);
+  const s = 0.8 + rnd() * 0.5;
+  const col = TREE_GREENS[Math.floor(rnd() * TREE_GREENS.length)];
   return (
-    <group position={[x, 0, z]}>
+    <group position={[x, 0, z]} scale={[s, s, s]}>
       <mesh position={[0, 0.45, 0]} castShadow>
         <cylinderGeometry args={[0.14, 0.2, 0.9, 6]} />
         <meshLambertMaterial color="#8d5524" flatShading />
       </mesh>
       <mesh position={[0, 1.25, 0]} castShadow>
         <coneGeometry args={[0.8, 1.7, 7]} />
-        <meshLambertMaterial color="#3fa34d" flatShading />
+        <meshLambertMaterial color={col} flatShading />
       </mesh>
       <mesh position={[0, 1.95, 0]} castShadow>
         <coneGeometry args={[0.55, 1.1, 7]} />
-        <meshLambertMaterial color="#54b85a" flatShading />
+        <meshLambertMaterial color={col} flatShading />
       </mesh>
     </group>
+  );
+}
+
+function Bush({ x, z }: { x: number; z: number }) {
+  const rnd = useMemo(() => seededRandom(Math.floor(x * 31 + z * 7)), [x, z]);
+  const s = 0.7 + rnd() * 0.5;
+  return (
+    <group position={[x, 0, z]} scale={[s, s, s]}>
+      <mesh position={[0, 0.3, 0]} castShadow>
+        <dodecahedronGeometry args={[0.34, 0]} />
+        <meshLambertMaterial color="#3d8b40" flatShading />
+      </mesh>
+      <mesh position={[0.18, 0.42, 0.1]} castShadow>
+        <dodecahedronGeometry args={[0.22, 0]} />
+        <meshLambertMaterial color="#4a9c4b" flatShading />
+      </mesh>
+      <mesh position={[-0.16, 0.4, -0.06]}>
+        <dodecahedronGeometry args={[0.2, 0]} />
+        <meshLambertMaterial color="#356f38" flatShading />
+      </mesh>
+    </group>
+  );
+}
+
+function Stump({ x, z }: { x: number; z: number }) {
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, 0.2, 0]} castShadow>
+        <cylinderGeometry args={[0.28, 0.34, 0.4, 7]} />
+        <meshLambertMaterial color="#7a4a22" flatShading />
+      </mesh>
+      <mesh position={[0, 0.42, 0]}>
+        <cylinderGeometry args={[0.26, 0.28, 0.05, 7]} />
+        <meshLambertMaterial color="#c79b6b" flatShading />
+      </mesh>
+    </group>
+  );
+}
+
+function SmallRock({ x, z }: { x: number; z: number }) {
+  const rnd = useMemo(() => seededRandom(Math.floor(x * 53 + z * 11)), [x, z]);
+  const s = 0.5 + rnd() * 0.4;
+  const col = rnd() < 0.5 ? "#a8a49b" : "#8f9aa3";
+  return (
+    <mesh position={[x, 0.12 * s, z]} scale={[s, 0.7 * s, s]} castShadow>
+      <dodecahedronGeometry args={[0.32, 0]} />
+      <meshLambertMaterial color={col} flatShading />
+    </mesh>
   );
 }
 
@@ -523,10 +578,12 @@ function HouseInterior({
   houseFurniture,
   onVendingMachine,
   onBed,
+  onLeave,
 }: {
   houseFurniture: (string | null)[];
   onVendingMachine: () => void;
   onBed: () => void;
+  onLeave: () => void;
 }) {
   const W = 5.2;
   const D = 4.0;
@@ -560,6 +617,31 @@ function HouseInterior({
         <boxGeometry args={[1.8, 2.8, 0.15]} />
         <meshLambertMaterial color="#b98a5e" flatShading />
       </mesh>
+
+      {/* 门口：可点击离开（透光门板 + 门框 + 出口脚垫） */}
+      <group position={[0, 0, D / 2]}>
+        <mesh position={[0, 1.1, 0]} onClick={(e) => { e.stopPropagation(); onLeave(); }}>
+          <boxGeometry args={[1.5, 2.2, 0.06]} />
+          <meshLambertMaterial color="#ffe9b0" transparent opacity={0.32} emissive="#f7c948" emissiveIntensity={0.3} />
+        </mesh>
+        <mesh position={[-0.8, 1.3, 0]}>
+          <boxGeometry args={[0.12, 2.6, 0.14]} />
+          <meshLambertMaterial color="#7c4a1f" flatShading />
+        </mesh>
+        <mesh position={[0.8, 1.3, 0]}>
+          <boxGeometry args={[0.12, 2.6, 0.14]} />
+          <meshLambertMaterial color="#7c4a1f" flatShading />
+        </mesh>
+        <mesh position={[0, 2.36, 0]}>
+          <boxGeometry args={[1.72, 0.18, 0.14]} />
+          <meshLambertMaterial color="#7c4a1f" flatShading />
+        </mesh>
+        {/* 出口脚垫 */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, -0.5]} onClick={(e) => { e.stopPropagation(); onLeave(); }}>
+          <circleGeometry args={[0.3, 16]} />
+          <meshBasicMaterial color="#ffd166" transparent opacity={0.5} toneMapped={false} depthWrite={false} />
+        </mesh>
+      </group>
 
       {/* 暖光 */}
       <ambientLight intensity={0.55} color="#fff1d6" />
@@ -605,7 +687,7 @@ function CameraRig({ world, houseView }: { world: World; houseView: boolean }) {
 
 // ---- 场景主体 ----
 
-function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, playerDirRef, houseView, houseFurniture, onVendingMachine, onBed }: SceneProps) {
+function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, playerDirRef, houseView, houseFurniture, onVendingMachine, onBed, onLeave }: SceneProps) {
   const dirRef = useRef<THREE.DirectionalLight>(null);
   const bgColor = useRef(new THREE.Color()).current;
   const fogRef = useRef(new THREE.Fog(0x88b8e0, 20, 55)).current;
@@ -683,11 +765,31 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
     return arr;
   }, []);
 
+  // 稀疏的灌木 / 树桩 / 小石头（点缀细节，不密集）
+  const decorations = useMemo(() => {
+    const rnd = seededRandom(7717);
+    const bush: { x: number; z: number }[] = [];
+    const stump: { x: number; z: number }[] = [];
+    const srock: { x: number; z: number }[] = [];
+    for (let ty = 3; ty < MAP_H - 3; ty++) {
+      for (let tx = 3; tx < MAP_W - 3; tx++) {
+        if (world.map[ty][tx] !== TYPES.GRASS) continue;
+        if (tx <= 7 && ty <= 5) continue; // 小屋门口
+        if (Math.abs(tx - RIVER_COL) <= 1) continue; // 河两岸
+        const r = rnd();
+        if (r < 0.008) bush.push({ x: tx + 0.5, z: ty + 0.5 });
+        else if (r < 0.013) stump.push({ x: tx + 0.5, z: ty + 0.5 });
+        else if (r < 0.02) srock.push({ x: tx + 0.5, z: ty + 0.5 });
+      }
+    }
+    return { bush, stump, srock };
+  }, [world]);
+
   return (
     <>
       <CameraRig world={world} houseView={houseView} />
       {houseView ? (
-        <HouseInterior houseFurniture={houseFurniture} onVendingMachine={onVendingMachine} onBed={onBed} />
+        <HouseInterior houseFurniture={houseFurniture} onVendingMachine={onVendingMachine} onBed={onBed} onLeave={onLeave} />
       ) : (
         <>
       <ambientLight intensity={0.42} color="#fff7e6" />
@@ -735,9 +837,9 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
         </mesh>
       ))}
 
-      {/* 树 / 花 / 草 / 小屋 */}
+      {/* 树 / 花 / 草 / 灌木 / 树桩 / 小石头 / 小屋 */}
       {trees.map((t, i) => (
-        <Tree key={`t-${i}`} x={t.x} z={t.z} />
+        <Tree key={`t-${i}`} x={t.x} z={t.z} seed={i * 97 + 13} />
       ))}
       {flowers.map((f, i) => (
         <Flower key={`f-${i}`} x={f.x} z={f.z} color={FLOWER_COLORS[i % FLOWER_COLORS.length]} />
@@ -745,9 +847,18 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
       {grass.map((g, i) => (
         <GrassTuft key={`g-${i}`} x={g.x} z={g.z} hue={g.hue} />
       ))}
+      {decorations.bush.map((b, i) => (
+        <Bush key={`b-${i}`} x={b.x} z={b.z} />
+      ))}
+      {decorations.stump.map((s, i) => (
+        <Stump key={`st-${i}`} x={s.x} z={s.z} />
+      ))}
+      {decorations.srock.map((r, i) => (
+        <SmallRock key={`sr-${i}`} x={r.x} z={r.z} />
+      ))}
       <Hut x={HUT_CENTER.x} z={HUT_CENTER.z} />
-      <Rock x={12.8} z={11} />
-      <Rock x={17.2} z={6.5} />
+      <Rock x={22.5} z={14.5} />
+      <Rock x={24.5} z={16.5} />
 
       {/* 物品（worldVersion 变化时重渲染，支持拾取后消失） */}
       {world.items.map((it, i) => (

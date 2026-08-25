@@ -1,8 +1,8 @@
 // 《森林里好像有什么》纯逻辑引擎：地图 / 移动 / 拾取 / 河边 / 小屋坐标。
 
 export const TILE = 36;
-export const MAP_W = 36;
-export const MAP_H = 24;
+export const MAP_W = 46;
+export const MAP_H = 30;
 export const PLAYER_RADIUS = 12;
 export const PLAYER_SPEED = 150; // px/s
 
@@ -28,7 +28,7 @@ export interface World {
 }
 
 // 河（竖直贯穿）所在列；小屋中心（tile 单位，x/z）。
-const RIVER_COL = Math.floor(MAP_W * 0.78);
+export const RIVER_COL = Math.floor(MAP_W * 0.78);
 export const RIVER_X = RIVER_COL + 0.5;
 const HUT_ROWS = 2;
 const HUT_COLS = [3, 4];
@@ -63,26 +63,35 @@ function buildMap(): number[][] {
   for (let y = 4; y < pathRow; y++) map[y][3] = TYPES.PATH;
   for (let x = 3; x < RIVER_COL; x++) map[pathRow][x] = TYPES.PATH;
 
-  // 内部散布的树（确定性），避开小屋/河岸/小路/中央空地
-  const midX = MAP_W / 2;
-  const midY = MAP_H / 2;
+  // 几处空地/林间隙（让大森林更透气，不密集）
+  const clearings: [number, number, number][] = [
+    [Math.floor(MAP_W / 2), Math.floor(MAP_H / 2), 4.5],
+    [Math.floor(MAP_W * 0.3), Math.floor(MAP_H * 0.65), 3.5],
+    [Math.floor(MAP_W * 0.62), Math.floor(MAP_H * 0.35), 3.5],
+    [Math.floor(MAP_W * 0.2), Math.floor(MAP_H * 0.35), 3],
+    [Math.floor(MAP_W * 0.75), Math.floor(MAP_H * 0.7), 3],
+  ];
+  const inClearing = (tx: number, ty: number) =>
+    clearings.some(([cx, cy, r]) => Math.hypot(tx - cx, ty - cy) < r);
+
+  // 内部散布的树（确定性），避开小屋/河岸/小路/空地，且整体稀疏
   for (let ty = 2; ty < MAP_H - 2; ty++) {
     for (let tx = 2; tx < MAP_W - 2; tx++) {
       if (map[ty][tx] !== TYPES.GRASS) continue;
+      if (inClearing(tx, ty)) continue; // 空地不长树
       if (HUT_COLS.includes(tx) && ty <= 4) continue; // 小屋门前清空
       if (tx <= 6 && ty <= 4) continue; // 小屋周围空出
       if (Math.abs(tx - RIVER_COL) <= 1) continue; // 河两岸空出
       if (tx === 3 && ty >= 4) continue; // 竖路
       if (ty === pathRow && tx >= 3 && tx <= RIVER_COL) continue; // 横路
-      if (Math.hypot(tx - midX, ty - midY) < 4) continue; // 中央空地
-      if (rnd() < 0.09) map[ty][tx] = TYPES.TREE;
+      if (rnd() < 0.05) map[ty][tx] = TYPES.TREE;
     }
   }
-  // 花：散落在草地上
+  // 花：散落在草地上（稀疏）
   for (let ty = 2; ty < MAP_H - 2; ty++) {
     for (let tx = 2; tx < MAP_W - 2; tx++) {
       if (map[ty][tx] !== TYPES.GRASS) continue;
-      if (rnd() < 0.03) map[ty][tx] = TYPES.FLOWER;
+      if (rnd() < 0.018) map[ty][tx] = TYPES.FLOWER;
     }
   }
   return map;
@@ -122,12 +131,14 @@ export function createWorld(): World {
   placeAt("moon_stone", Math.floor(MAP_H * 0.5), Math.floor(MAP_W * 0.42));
   placeAt("strange_feather", Math.floor(MAP_H * 0.22), Math.floor(MAP_W * 0.16));
   placeAt("strange_seed", Math.floor(MAP_H * 0.6), Math.floor(MAP_W * 0.68));
+  placeAt("jade", Math.floor(MAP_H * 0.4), RIVER_COL + 2);
+  placeAt("pearl", Math.floor(MAP_H * 0.78), RIVER_COL - 2);
 
-  // 随机普通物品（散落草地/路/花）
-  const common = ["stick", "leaf", "stone", "pinecone", "mushroom", "flower", "feather"];
+  // 随机普通物品（散落草地/路/花，数量稀疏、不密集）
+  const common = ["stick", "leaf", "stone", "pinecone", "mushroom", "flower", "feather", "clover", "shell"];
   const placed = new Set<string>();
   let tries = 0;
-  while (items.length < 52 && tries < 1200) {
+  while (items.length < 36 && tries < 1600) {
     tries++;
     const tx = 1 + Math.floor(Math.random() * (MAP_W - 2));
     const ty = 1 + Math.floor(Math.random() * (MAP_H - 2));

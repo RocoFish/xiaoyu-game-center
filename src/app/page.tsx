@@ -1,10 +1,15 @@
+"use client";
+
 import Link from "next/link";
 import { Trophy } from "lucide-react";
 import { GAMES } from "@/games/registry";
+import { useLang } from "@/lib/i18n";
 import { GameCard } from "@/components/GameCard";
 import { buttonVariants } from "@/components/ui/Button";
 
 export default function Home() {
+  const { t } = useLang();
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:py-14">
       {/* Hero */}
@@ -12,21 +17,14 @@ export default function Home() {
         <div className="inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-orange-500/20 to-red-500/10 text-5xl shadow-inner">
           🏀
         </div>
-        <h1 className="mt-5 text-4xl font-black tracking-tight sm:text-5xl">
-          小鱼 Game Center
-        </h1>
-        <p className="mx-auto mt-3 max-w-md text-base text-muted-foreground sm:text-lg">
-          简单好玩的在线小游戏合集，刷新全球排行榜！
-        </p>
+        <h1 className="mt-5 text-4xl font-black tracking-tight sm:text-5xl">{t("home.title")}</h1>
+        <p className="mx-auto mt-3 max-w-md text-base text-muted-foreground sm:text-lg">{t("home.sub")}</p>
         <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
           <a href="#games" className={buttonVariants({ size: "lg" })}>
-            🎮 选择游戏
+            {t("home.play")}
           </a>
-          <Link
-            href="/leaderboard"
-            className={buttonVariants({ variant: "outline", size: "lg" })}
-          >
-            <Trophy className="h-4 w-4" /> 排行榜
+          <Link href="/leaderboard" className={buttonVariants({ variant: "outline", size: "lg" })}>
+            <Trophy className="h-4 w-4" /> {t("home.leaderboard")}
           </Link>
         </div>
       </section>
@@ -43,11 +41,11 @@ export default function Home() {
               <div className="flex items-center gap-4">
                 <span className="text-5xl">{g.emoji}</span>
                 <div>
-                  <h2 className="text-2xl font-black sm:text-3xl">《{g.title}》</h2>
-                  <p className="mt-1 text-sm text-muted-foreground sm:text-base">{g.description}</p>
+                  <h2 className="text-2xl font-black sm:text-3xl">《{t(`game.${g.id}.title`)}》</h2>
+                  <p className="mt-1 text-sm text-muted-foreground sm:text-base">{t(`game.${g.id}.desc`)}</p>
                 </div>
               </div>
-              <span className={buttonVariants({ size: "lg" })}>进入森林</span>
+              <span className={buttonVariants({ size: "lg" })}>{t("home.enterForest")}</span>
             </div>
           </Link>
         ))}
@@ -56,8 +54,8 @@ export default function Home() {
       {/* 游戏选择区 */}
       <section id="games" className="mt-14 scroll-mt-16">
         <div className="flex items-end justify-between">
-          <h2 className="text-xl font-bold sm:text-2xl">更多小游戏</h2>
-          <span className="text-sm text-muted-foreground">更多小游戏持续上新</span>
+          <h2 className="text-xl font-bold sm:text-2xl">{t("home.more")}</h2>
+          <span className="text-sm text-muted-foreground">{t("home.moreSub")}</span>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {GAMES.filter((g) => !g.featured).map((g) => (

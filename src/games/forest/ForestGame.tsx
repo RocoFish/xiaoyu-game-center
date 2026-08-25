@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { X, Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { useLang } from "@/lib/i18n";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { ITEMS, getItem, type ItemDef } from "./items";
 import { FURNITURE, getFurniture } from "./house";
@@ -12,6 +13,7 @@ import {
   TILE,
   CATEGORY,
   HUT_CENTER,
+  RIVER_COL,
   createWorld,
   movePlayer,
   pickupNearby,
@@ -28,6 +30,8 @@ const INV_KEY = "forest_inventory";
 const DISC_KEY = "forest_discovered";
 const STATS_KEY = "forest_stats";
 const DAY_CYCLE = 240; // 一整天 = 4 分钟（游戏内部时间）
+const HINT_DURATION = 5200; // 每条提示显示时长（毫秒）
+const MAX_HINTS = 5; // 最多同时显示几条
 
 const MYSTERY_EVENTS = [
   { icon: "🐾", text: "一串脚印延伸进树林深处……" },
@@ -53,6 +57,9 @@ const VENDOR_PRODUCTS: VendorProduct[] = [
   { id: "moon_stone", name: "月光石", icon: "🌙", cost: 45, desc: "月亮出来的时候，它会亮一下。", kind: "item" },
   { id: "glowfish", name: "发光鱼", icon: "✨", cost: 60, desc: "夜里，它自己会亮。", kind: "item" },
   { id: "strange_seed", name: "奇怪的种子", icon: "🌱", cost: 55, desc: "不知道会长出什么。", kind: "item" },
+  { id: "jade", name: "青玉", icon: "💎", cost: 70, desc: "买回来亮晶晶的。", kind: "item" },
+  { id: "pearl", name: "河珍珠", icon: "🫧", cost: 110, desc: "月光见过它。", kind: "item" },
+  { id: "clover", name: "四叶草", icon: "🍀", cost: 18, desc: "据说找到它的人会走运。", kind: "item" },
   { id: "lamp", name: "蘑菇灯（家具）", icon: "🪔", cost: 50, desc: "摆进小屋。", kind: "furniture" },
   { id: "clock", name: "不会走的钟（家具）", icon: "🕰️", cost: 55, desc: "摆进小屋。", kind: "furniture" },
   { id: "piano", name: "没人弹的钢琴（家具）", icon: "🎹", cost: 90, desc: "摆进小屋。", kind: "furniture" },
@@ -61,8 +68,10 @@ const VENDOR_PRODUCTS: VendorProduct[] = [
 // 可出售物品 → 星星价（卖给售卖机）
 const SELL_PRICES: Record<string, number> = {
   stick: 1, leaf: 1, pinecone: 2, stone: 2, mushroom: 3, flower: 2, feather: 2,
+  clover: 4, shell: 5,
   carp: 6, bass: 7, puffer: 8, goldfish: 25, glowfish: 35,
   glow_branch: 15, blue_mushroom: 20, strange_feather: 25, moon_stone: 22, strange_seed: 28,
+  jade: 30, pearl: 40,
   bait: 5,
 };
 
@@ -78,6 +87,12 @@ interface StatState {
 }
 
 type FishPhase = "idle" | "casting" | "biting";
+
+interface HintItem {
+  id: number;
+  text: string;
+  kind: "ok" | "warn";
+}
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -97,6 +112,15 @@ function timeLabel(p: number): string {
 
 export function ForestGame() {
   const { user } = useAuth();
+  const { tt, tf, lang } = useLang();
+  const ttRef = useRef(tt);
+  const tfRef = useRef(tf);
+  const langRef = useRef(lang);
+  useEffect(() => {
+    ttRef.current = tt;
+    tfRef.current = tf;
+    langRef.current = lang;
+  }, [tt, tf, lang]);
 
   const worldRef = useRef<World>(null as unknown as World);
   if (!worldRef.current) worldRef.current = createWorld();
@@ -119,7 +143,7 @@ export function ForestGame() {
   const [showInv, setShowInv] = useState(false);
   const [journal, setJournal] = useState<boolean>(false);
   const [selected, setSelected] = useState<ItemDef | null>(null);
-  const [hint, setHint] = useState<{ text: string; kind: "ok" | "warn" } | null>(null);
+  const [hints, setHints] = useState<HintItem[]>([]);
   const [house, setHouse] = useState<(string | null)[]>(() => loadJson("forest_house", Array(9).fill(null)));
   const [showHouse, setShowHouse] = useState(false);
   const [globalStats, setGlobalStats] = useState<{ pickup: number; mushroom: number; visit: number }>({
@@ -153,7 +177,8 @@ export function ForestGame() {
   const [weatherUI, setWeatherUI] = useState<"sunny" | "rain">("sunny");
   const [timeUI, setTimeUI] = useState("白天");
 
-  const hintTimerRef = useRef<number | null>(null);
+  const hintIdRef = useRef(0);
+  const hintTimersRef = useRef<Map<number, number>>(new Map());
   const inventoryRef = useRef(inventory);
   const nearRiverRef = useRef(false);
   const fishPhaseRef = useRef<FishPhase>("idle");
@@ -169,6 +194,7 @@ export function ForestGame() {
   const lowEnergyWarnedRef = useRef(false);
   const nearRiverHintedRef = useRef(false);
   const nearHutHintedRef = useRef(false);
+  const inHouseRef = useRef(false);
 
   useEffect(() => {
     userRef.current = user;
@@ -191,6 +217,10 @@ export function ForestGame() {
   }, [sleeping]);
 
   useEffect(() => {
+    inHouseRef.current = inHouse;
+  }, [inHouse]);
+
+  useEffect(() => {
     fishPhaseRef.current = fishPhase;
   }, [fishPhase]);
 
@@ -204,10 +234,22 @@ export function ForestGame() {
   }, []);
 
   const showHint = useCallback((text: string, kind: "ok" | "warn") => {
-    setHint({ text, kind });
-    if (hintTimerRef.current) window.clearTimeout(hintTimerRef.current);
-    hintTimerRef.current = window.setTimeout(() => setHint(null), 2400);
+    const id = ++hintIdRef.current;
+    setHints((prev) => [...prev, { id, text, kind }]);
+    const timer = window.setTimeout(() => {
+      hintTimersRef.current.delete(id);
+      setHints((prev) => prev.filter((h) => h.id !== id));
+    }, HINT_DURATION);
+    hintTimersRef.current.set(id, timer);
   }, []);
+
+  useEffect(
+    () => () => {
+      hintTimersRef.current.forEach((t) => window.clearTimeout(t));
+      hintTimersRef.current.clear();
+    },
+    [],
+  );
 
   const discover = useCallback((itemId: string) => {
     setDiscovered((prev) => {
@@ -236,20 +278,20 @@ export function ForestGame() {
     const s = statsRef.current;
     if (!reactedRef.current.has("wood") && (s.wood ?? 0) >= 6) {
       reactedRef.current.add("wood");
-      if (spawnItemNear(w, "flower", 5, 3, 2)) showHint("森林好像在你常捡树枝的地方，开了一朵花。", "ok");
+      if (spawnItemNear(w, "flower", 5, 3, 2)) showHint(ttRef.current("森林好像在你常捡树枝的地方，开了一朵花。"), "ok");
     }
     if (!reactedRef.current.has("mushroom") && (s.mushroom ?? 0) >= 3) {
       reactedRef.current.add("mushroom");
-      if (spawnItemNear(w, "blue_mushroom", 2, 5, 2)) showHint("你捡了很多蘑菇……森林里冒出一株蓝色的。", "ok");
+      if (spawnItemNear(w, "blue_mushroom", 2, 5, 2)) showHint(ttRef.current("你捡了很多蘑菇……森林里冒出一株蓝色的。"), "ok");
     }
     if (!reactedRef.current.has("stone") && (s.stone ?? 0) >= 4) {
       reactedRef.current.add("stone");
-      if (spawnItemNear(w, "moon_stone", 28, 12, 3)) showHint("河边的石头少了一块，那里多了一颗会发亮的石头。", "ok");
+      if (spawnItemNear(w, "moon_stone", RIVER_COL + 2, 12, 3)) showHint(ttRef.current("河边的石头少了一块，那里多了一颗会发亮的石头。"), "ok");
     }
     // 秘密：夜里多次来访 → 树下出现神秘种子
     if (!reactedRef.current.has("night") && (s.night ?? 0) >= 3) {
       reactedRef.current.add("night");
-      if (spawnItemNear(w, "strange_seed", 7, 3, 2)) showHint("夜深了。你常去的树下，多了一粒奇怪的种子。", "ok");
+      if (spawnItemNear(w, "strange_seed", 7, 3, 2)) showHint(ttRef.current("夜深了。你常去的树下，多了一粒奇怪的种子。"), "ok");
     }
   }, [showHint]);
 
@@ -309,11 +351,10 @@ export function ForestGame() {
           body: JSON.stringify({ action: cat === "mushroom" ? "mushroom" : "pickup" }),
         }).catch(() => {});
       }
-      showHint(
-        `${def.icon} 拾起「${def.name}」${def.rarity === "rare" ? "（稀有！）" : ""}` +
-          (night && def.rarity === "rare" ? " · 月光下它似乎更亮了" : ""),
-        "ok",
-      );
+      const name = ttRef.current(def.name);
+      const rareSfx = def.rarity === "rare" ? ttRef.current("（稀有！）") : "";
+      const moon = night && def.rarity === "rare" ? ttRef.current("· 月光下它似乎更亮了") : "";
+      showHint(`${def.icon} ` + tfRef.current("拾起「{name}」{rare}", { name, rare: rareSfx }) + moon, "ok");
     },
     [gainItem, checkResponses, saveStats, showHint],
   );
@@ -335,7 +376,9 @@ export function ForestGame() {
       statsRef.current.stars = (statsRef.current.stars ?? 0) + starsGain;
       statsRef.current.fish = (statsRef.current.fish ?? 0) + 1;
       saveStats();
-      showHint(`🎣 钓到「${def.name}」 获得 ${starsGain}⭐${rare ? "（稀有！）" : ""}`, "ok");
+      const name = ttRef.current(def.name);
+      const tpl = rare ? "🎣 钓到「{name}」 获得 {n}⭐（稀有！）" : "🎣 钓到「{name}」 获得 {n}⭐";
+      showHint(tfRef.current(tpl, { name, n: starsGain }), "ok");
     },
     [gainItem, saveStats, showHint],
   );
@@ -382,7 +425,7 @@ export function ForestGame() {
     }
     fishPhaseRef.current = "casting";
     setFishPhase("casting");
-    showHint("🎣 抛出鱼线，静静等待……", "ok");
+    showHint(ttRef.current("🎣 抛出鱼线，静静等待……"), "ok");
     const c = 0.4 + Math.random() * 0.2;
     const half = 0.1 + Math.random() * 0.05;
     const zone: [number, number] = [Math.max(0.05, c - half), Math.min(0.95, c + half)];
@@ -394,8 +437,8 @@ export function ForestGame() {
     fishCastTimerRef.current = window.setTimeout(() => {
       fishPhaseRef.current = "biting";
       setFishPhase("biting");
-      showHint("鱼儿咬钩了！按 F / 点「收竿」！", "ok");
-      fishAutoMissRef.current = window.setTimeout(() => finishFish(false, "啊……鱼儿游走了。"), 2600);
+      showHint(ttRef.current("鱼儿咬钩了！按 F / 点「收竿」！"), "ok");
+      fishAutoMissRef.current = window.setTimeout(() => finishFish(false, ttRef.current("啊……鱼儿游走了。")), 2600);
     }, 900 + Math.random() * 500);
   }, [clearFishTimers, showHint, finishFish]);
 
@@ -406,7 +449,7 @@ export function ForestGame() {
     if (cur >= lo && cur <= hi) {
       finishFish(true, "");
     } else {
-      finishFish(false, "哎呀，时机没抓好，鱼儿溜走了！");
+      finishFish(false, ttRef.current("哎呀，时机没抓好，鱼儿溜走了！"));
     }
   }, [finishFish]);
 
@@ -417,13 +460,13 @@ export function ForestGame() {
     (p: VendorProduct) => {
       const stars = statsRef.current.stars ?? 0;
       if (stars < p.cost) {
-        showHint(`星星不够，去河边钓点鱼吧（需要 ${p.cost}⭐）。`, "warn");
+        showHint(tfRef.current("星星不够，去河边钓点鱼吧（需要 {n}⭐）。", { n: p.cost }), "warn");
         return;
       }
       if (p.kind === "furniture") {
         const idx = house.indexOf(null);
         if (idx === -1) {
-          showHint("小屋已经摆满了。", "warn");
+          showHint(ttRef.current("小屋已经摆满了。"), "warn");
           return;
         }
         statsRef.current.stars = stars - p.cost;
@@ -432,13 +475,13 @@ export function ForestGame() {
         nextHouse[idx] = p.id;
         setHouse(nextHouse);
         try { localStorage.setItem("forest_house", JSON.stringify(nextHouse)); } catch {}
-        showHint(`🧾 买下「${p.name}」并摆进小屋。`, "ok");
+        showHint(tfRef.current("🧾 买下「{name}」并摆进小屋。", { name: ttRef.current(p.name) }), "ok");
         return;
       }
       statsRef.current.stars = stars - p.cost;
       saveStats();
       gainItem(p.id);
-      showHint(`🧾 买了「${p.name}」`, "ok");
+      showHint(tfRef.current("🧾 买了「{name}」", { name: ttRef.current(p.name) }), "ok");
     },
     [house, gainItem, saveStats, showHint],
   );
@@ -465,7 +508,7 @@ export function ForestGame() {
       const price = SELL_PRICES[itemId];
       if (!price) return;
       if ((inventory[itemId] ?? 0) <= 0) {
-        showHint("背包里没有这个。", "warn");
+        showHint(ttRef.current("背包里没有这个。"), "warn");
         return;
       }
       setInventory((prev) => {
@@ -479,7 +522,7 @@ export function ForestGame() {
       });
       statsRef.current.stars = (statsRef.current.stars ?? 0) + price;
       saveStats();
-      showHint(`出售「${getItem(itemId).name}」 获得 ${price}⭐`, "ok");
+      showHint(tfRef.current("出售「{name}」 获得 {n}⭐", { name: ttRef.current(getItem(itemId).name), n: price }), "ok");
     },
     [inventory, saveStats, showHint],
   );
@@ -487,7 +530,7 @@ export function ForestGame() {
   const sleep = useCallback(() => {
     if (sleeping) return;
     setSleeping(true);
-    showHint("💤 你在柔软的床上睡着了……", "ok");
+    showHint(ttRef.current("💤 你在柔软的床上睡着了……"), "ok");
     if (sleepTimerRef.current) window.clearTimeout(sleepTimerRef.current);
     sleepTimerRef.current = window.setTimeout(() => {
       statsRef.current.energy = 100;
@@ -495,7 +538,7 @@ export function ForestGame() {
       saveStats();
       setSleeping(false);
       setEnergyUI(100);
-      showHint("⚡ 精神完全恢复啦！", "ok");
+      showHint(ttRef.current("⚡ 精神完全恢复啦！"), "ok");
     }, 2600);
   }, [sleeping, saveStats, showHint]);
 
@@ -573,7 +616,7 @@ export function ForestGame() {
       if (!def) return;
       for (const [itemId, n] of Object.entries(def.cost)) {
         if ((inventory[itemId] ?? 0) < (n ?? 0)) {
-          showHint("资源不够，去森林里多捡一点吧。", "warn");
+          showHint(ttRef.current("资源不够，去森林里多捡一点吧。"), "warn");
           return;
         }
       }
@@ -583,13 +626,13 @@ export function ForestGame() {
       const nextHouse = [...house];
       const empty = nextHouse.indexOf(null);
       if (empty === -1) {
-        showHint("小屋已经摆满了。", "warn");
+        showHint(ttRef.current("小屋已经摆满了。"), "warn");
         return;
       }
       nextHouse[empty] = fid;
       setHouse(nextHouse);
       try { localStorage.setItem("forest_house", JSON.stringify(nextHouse)); } catch {}
-      showHint(`在屋里摆了「${def.name}」`, "ok");
+      showHint(tfRef.current("在屋里摆了「{name}」", { name: ttRef.current(def.name) }), "ok");
     },
     [house, inventory, saveInv, showHint],
   );
@@ -647,7 +690,7 @@ export function ForestGame() {
     };
   }, [startFish, reelFish]);
 
-  // ESC：优先关闭背包/图鉴/小屋弹窗（并尽量阻止页面退出全屏）；没弹窗时交给浏览器原生（ESC 退全屏）
+  // ESC：优先关闭背包/图鉴/小屋弹窗；其次若在小屋则离开小屋；再交给浏览器原生（ESC 退全屏）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -659,11 +702,17 @@ export function ForestGame() {
         else setShowHouse(false);
         return;
       }
-      // 没弹窗：不主动 exitFullscreen，让浏览器决定（原生全屏下按 ESC 即退出全屏）
+      if (inHouse && !sleeping) {
+        e.preventDefault();
+        e.stopPropagation();
+        leaveHouse();
+        return;
+      }
+      // 没弹窗、不在屋内：不主动 exitFullscreen，让浏览器决定（原生全屏下按 ESC 即退出全屏）
     };
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, [showInv, journal, showHouse]);
+  }, [showInv, journal, showHouse, inHouse, sleeping, leaveHouse]);
 
   // 主循环：推进时间 / 天气 / 昼夜 / 神秘事件，移动玩家，自动拾取
   useEffect(() => {
@@ -685,36 +734,38 @@ export function ForestGame() {
         setWeatherUI(weatherRef.current);
       }
       const p = (timeRef.current % DAY_CYCLE) / DAY_CYCLE;
-      const lbl = timeLabel(p);
+      const lbl = ttRef.current(timeLabel(p));
       setTimeUI((prev) => (prev === lbl ? prev : lbl));
 
       const w = worldRef.current;
-      const asleep = sleepingRef.current;
+      const frozen = sleepingRef.current || inHouseRef.current;
       const energyNow = statsRef.current.energy ?? 100;
 
-      // 移动（低能量减速；睡觉时冻结）
+      // 移动（高能量正常；低能量减速；睡觉/屋内冻结）
       const vx = keyVecRef.current.x + joyVecRef.current.x;
       const vy = keyVecRef.current.y + joyVecRef.current.y;
-      const moving = !asleep && (vx !== 0 || vy !== 0);
+      const moving = !frozen && (vx !== 0 || vy !== 0);
       if (moving) {
         const speedMul = energyNow < 25 ? 0.55 : 1;
         movePlayer(worldRef.current, vx * speedMul, vy * speedMul, dt);
         statsRef.current.energy = Math.max(0, energyNow - dt * 0.9);
       }
 
-      // 自动拾取：走近物品直接捡起（无需点击）
-      if (!asleep) {
+      // 自动拾取：走近物品直接捡起（无需点击）；睡觉/屋内不拾取
+      if (!frozen) {
         const near = pickupNearby(worldRef.current);
         if (near) pickUpItem(near);
       }
 
-      // 神秘事件：靠近时揭示
-      for (let i = mysteryRef.current.length - 1; i >= 0; i--) {
-        const m = mysteryRef.current[i];
-        if (Math.hypot(m.x - w.player.x, m.y - w.player.y) < TILE * 1.2) {
-          mysteryRef.current.splice(i, 1);
-          showHint(`${m.icon} ${m.text}`, "warn");
-          setWorldVersion((v) => v + 1);
+      // 神秘事件：靠近时揭示（屋内不触发）
+      if (!frozen) {
+        for (let i = mysteryRef.current.length - 1; i >= 0; i--) {
+          const m = mysteryRef.current[i];
+          if (Math.hypot(m.x - w.player.x, m.y - w.player.y) < TILE * 1.2) {
+            mysteryRef.current.splice(i, 1);
+            showHint(`${m.icon} ${ttRef.current(m.text)}`, "warn");
+            setWorldVersion((v) => v + 1);
+          }
         }
       }
 
@@ -726,7 +777,7 @@ export function ForestGame() {
       }
       if (nearRiverNow && !nearRiverHintedRef.current) {
         nearRiverHintedRef.current = true;
-        showHint("🎣 到河边了，按 F（或点“钓鱼”）抛竿！", "ok");
+        showHint(ttRef.current("🎣 到河边了，按 F（或点“钓鱼”）抛竿！"), "ok");
       }
 
       // 小屋门口检测（供进屋）
@@ -738,15 +789,15 @@ export function ForestGame() {
       }
       if (nearHutNow && !nearHutHintedRef.current) {
         nearHutHintedRef.current = true;
-        showHint("🏠 到家了～点“进入小屋”可以进去看看。", "ok");
+        showHint(ttRef.current("🏠 到家了～点“进入小屋”可以进去看看。"), "ok");
       }
 
       // 能量 UI 节流刷新 + 低能量一次性提示
       const energyInt = Math.round(statsRef.current.energy ?? 100);
       setEnergyUI((prev) => (prev === energyInt ? prev : energyInt));
-      if (!asleep && energyInt <= 25 && !lowEnergyWarnedRef.current) {
+      if (!frozen && energyInt <= 25 && !lowEnergyWarnedRef.current) {
         lowEnergyWarnedRef.current = true;
-        showHint("有点累了……回小屋休息恢复体力吧。", "warn");
+        showHint(ttRef.current("有点累了……回小屋休息恢复体力吧。"), "warn");
       }
 
       rafRef.current = requestAnimationFrame(loop);
@@ -772,39 +823,43 @@ export function ForestGame() {
         <div className="mb-1 flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span>🕐 {timeUI}</span>
-            <span>{weatherUI === "rain" ? "🌧️ 下雨" : "☀️ 晴朗"}</span>
+            <span>{weatherUI === "rain" ? `🌧️ ${tt("下雨")}` : `☀️ ${tt("晴朗")}`}</span>
             <span>⭐ {statsRef.current.stars ?? 0}</span>
             <span className="hidden sm:inline">🐟 {statsRef.current.fish ?? 0}</span>
             <span className={cn("font-semibold", energyUI <= 25 ? "text-red-400" : "text-emerald-300")}>
               ⚡ {energyUI}
             </span>
-            <span className="hidden sm:inline">{user ? "已登录" : "游客"}</span>
+            <span className="hidden sm:inline">{user ? tt("已登录") : tt("游客")}</span>
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => setJournal(true)}
               className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
             >
-              📖 图鉴
+              📖 {tt("图鉴")}
             </button>
             <button
               onClick={() => setShowInv(true)}
               className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
             >
-              🎒 背包
+              🎒 {tt("背包")}
             </button>
             <button
               onClick={() => setShowHouse(true)}
               className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
             >
-              🏠 小屋
+              🏠 {tt("小屋")}
             </button>
           </div>
         </div>
 
         {/* 全球今日统计 */}
         <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-xs text-zinc-300">
-          🌍 今日全部玩家：捡起 {globalStats.pickup} · 蘑菇 {globalStats.mushroom} · 探索 {globalStats.visit}
+          {tf("🌍 今日全部玩家：捡起 {a} · 蘑菇 {b} · 探索 {c}", {
+            a: globalStats.pickup,
+            b: globalStats.mushroom,
+            c: globalStats.visit,
+          })}
         </div>
 
         {/* 3D 森林 */}
@@ -826,26 +881,39 @@ export function ForestGame() {
               houseFurniture={house}
               onVendingMachine={openVending}
               onBed={sleep}
+              onLeave={leaveHouse}
             />
           </div>
 
           {/* 全屏按钮 */}
           <button
             onClick={toggleFullscreen}
-            aria-label={isFullscreen ? "退出全屏" : "全屏"}
+            aria-label={isFullscreen ? tt("退出全屏") : tt("全屏")}
             className="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-black/30 text-zinc-200 transition hover:bg-black/50"
           >
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
 
-          {hint && (
-            <div
-              className={cn(
-                "pointer-events-none absolute bottom-20 left-1/2 z-10 -translate-x-1/2 rounded-full px-4 py-1.5 text-sm font-semibold backdrop-blur",
-                hint.kind === "ok" ? "bg-green-500/25 text-green-100" : "bg-amber-500/25 text-amber-100",
+          <style>{`@keyframes hint-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`}</style>
+          {hints.length > 0 && (
+            <div className="pointer-events-none absolute bottom-20 left-1/2 z-20 flex w-96 max-w-[92%] -translate-x-1/2 flex-col items-center gap-1.5">
+              {hints.length > MAX_HINTS && (
+                <div className="rounded-full bg-black/45 px-3 py-1 text-xs font-semibold text-zinc-300 backdrop-blur">
+                  {lang === "en" ? `… ${hints.length - MAX_HINTS} more` : `… 还有 ${hints.length - MAX_HINTS} 条`}
+                </div>
               )}
-            >
-              {hint.text}
+              {hints.slice(-MAX_HINTS).map((h) => (
+                <div
+                  key={h.id}
+                  style={{ animation: "hint-in 0.25s ease" }}
+                  className={cn(
+                    "max-w-full rounded-full px-4 py-1.5 text-sm font-semibold backdrop-blur",
+                    h.kind === "ok" ? "bg-green-500/25 text-green-100" : "bg-amber-500/25 text-amber-100",
+                  )}
+                >
+                  {h.text}
+                </div>
+              ))}
             </div>
           )}
 
@@ -855,7 +923,7 @@ export function ForestGame() {
               onClick={enterHouse}
               className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 flex items-center gap-2 rounded-2xl bg-amber-500/95 px-5 py-3 text-base font-bold text-black shadow-lg transition hover:bg-amber-400"
             >
-              <span className="text-lg">🚪</span> 进入小屋
+              <span className="text-lg">🚪</span> {tt("进入小屋")}
             </button>
           )}
 
@@ -864,15 +932,16 @@ export function ForestGame() {
             <>
               <button
                 onClick={leaveHouse}
-                className="absolute left-2 top-2 z-10 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-zinc-100 backdrop-blur transition hover:bg-white/20"
+                className="absolute bottom-4 left-4 z-10 flex items-center gap-2 rounded-2xl bg-amber-500/95 px-5 py-3 text-base font-bold text-black shadow-lg transition hover:bg-amber-400"
               >
-                🚪 离开小屋
+                <span className="text-lg">🚪</span> {tt("离开小屋")}
+                <kbd className="rounded-md bg-black/25 px-1.5 py-0.5 text-xs font-bold">ESC</kbd>
               </button>
               <button
                 onClick={sleep}
-                className="absolute bottom-4 right-4 z-10 flex items-center gap-2 rounded-2xl bg-indigo-500/95 px-5 py-3 text-base font-bold text-white shadow-lg transition hover:bg-indigo-400"
+                className="absolute right-4 top-2 z-10 flex items-center gap-2 rounded-2xl bg-indigo-500/95 px-5 py-3 text-base font-bold text-white shadow-lg transition hover:bg-indigo-400"
               >
-                <span className="text-lg">💤</span> 上床休息
+                <span className="text-lg">💤</span> {tt("上床休息")}
               </button>
             </>
           )}
@@ -882,7 +951,7 @@ export function ForestGame() {
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm">
               <div className="text-center">
                 <div className="text-4xl">💤</div>
-                <div className="mt-2 text-sm text-zinc-100">你在软软的床上睡着了……</div>
+                <div className="mt-2 text-sm text-zinc-100">{tt("你在软软的床上睡着了……")}</div>
               </div>
             </div>
           )}
@@ -902,7 +971,7 @@ export function ForestGame() {
               )}
             >
               {fishPhase === "idle" && <span className="text-lg">🎣</span>}
-              <span>{fishPhase === "biting" ? "🎣 收竿！" : fishPhase === "casting" ? "⏳ 等待…" : "钓鱼"}</span>
+              <span>{fishPhase === "biting" ? `🎣 ${tt("收竿")}` : fishPhase === "casting" ? `⏳ ${tt("等待")}` : tt("钓鱼")}</span>
               {fishPhase !== "casting" && (
                 <kbd className="rounded-md bg-black/25 px-1.5 py-0.5 text-xs font-bold">F</kbd>
               )}
@@ -912,30 +981,30 @@ export function ForestGame() {
           {/* 钓鱼小游戏覆盖层 */}
           {fishPhase === "casting" && (
             <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-xl bg-black/30 px-5 py-3 text-sm text-zinc-100 backdrop-blur">
-              抛竿中……静静等待鱼儿上钩……
+              {tt("抛竿中……静静等待鱼儿上钩……")}
             </div>
           )}
           {fishPhase === "biting" && (
             <FishBiteBar cursorRef={fishCursorRef} zone={fishZone} onReel={reelFish} />
           )}
 
-          <Joystick onMove={(x, y) => (joyVecRef.current = { x, y })} />
+          {!inHouse && !sleeping && <Joystick onMove={(x, y) => (joyVecRef.current = { x, y })} />}
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-center text-[11px] text-zinc-400">
-          <span><kbd className="rounded bg-white/10 px-1">WASD</kbd>/<kbd className="rounded bg-white/10 px-1">方向键</kbd> 移动</span>
-          <span><kbd className="rounded bg-white/10 px-1">F</kbd> 钓鱼</span>
-          <span><kbd className="rounded bg-white/10 px-1">E</kbd>/<kbd className="rounded bg-white/10 px-1">I</kbd> 背包</span>
-          <span>走近自动拾取</span>
-          <span>靠近门口 🚪 进小屋</span>
-          <span><kbd className="rounded bg-white/10 px-1">ESC</kbd> 先关弹窗 · 再退全屏</span>
+          <span><kbd className="rounded bg-white/10 px-1">WASD</kbd>/<kbd className="rounded bg-white/10 px-1">{tt("方向键")}</kbd> {tt("移动")}</span>
+          <span><kbd className="rounded bg-white/10 px-1">F</kbd> {tt("钓鱼")}</span>
+          <span><kbd className="rounded bg-white/10 px-1">E</kbd>/<kbd className="rounded bg-white/10 px-1">I</kbd> {tt("背包")}</span>
+          <span>{tt("走近自动拾取")}</span>
+          <span>{tt("靠近门口 🚪 进小屋")}</span>
+          <span><kbd className="rounded bg-white/10 px-1">ESC</kbd> {tt("先关弹窗 · 再退全屏")}</span>
         </div>
 
       {/* 背包 */}
       {showInv && (
-        <Modal onClose={() => setShowInv(false)} title="🎒 背包">
+        <Modal onClose={() => setShowInv(false)} title={tt("🎒 背包")}>
           {inventoryEntries.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">背包空空如也，去森林里捡点东西吧。</p>
+            <p className="py-8 text-center text-sm text-muted-foreground">{tt("背包空空如也，去森林里捡点东西吧。")}</p>
           ) : (
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
               {inventoryEntries.map(([id, count]) => {
@@ -950,7 +1019,7 @@ export function ForestGame() {
                     )}
                   >
                     <div className="text-2xl">{def.icon}</div>
-                    <div className="mt-1 truncate text-xs font-semibold">{def.name}</div>
+                    <div className="mt-1 truncate text-xs font-semibold">{tt(def.name)}</div>
                     <div className="text-xs text-muted-foreground">× {count}</div>
                   </button>
                 );
@@ -960,12 +1029,12 @@ export function ForestGame() {
           {selected && (
             <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="font-bold">{selected.icon} {selected.name}</span>
+                <span className="font-bold">{selected.icon} {tt(selected.name)}</span>
                 <span className={selected.rarity === "rare" ? "text-orange-400" : "text-muted-foreground"}>
-                  {selected.rarity === "rare" ? "稀有" : "普通"}
+                  {selected.rarity === "rare" ? tt("稀有") : tt("普通")}
                 </span>
               </div>
-              <p className="mt-1 text-muted-foreground">{selected.description}</p>
+              <p className="mt-1 text-muted-foreground">{tt(selected.description)}</p>
             </div>
           )}
         </Modal>
@@ -973,9 +1042,9 @@ export function ForestGame() {
 
       {/* 森林图鉴 */}
       {journal && (
-        <Modal onClose={() => setJournal(false)} title="📖 森林图鉴">
+        <Modal onClose={() => setJournal(false)} title={"📖 " + tt("森林图鉴")}>
           <div className="mb-3 text-sm text-muted-foreground">
-            已发现 {discoveredSet.size} / {ITEMS.length} 种事物
+            {tf("已发现 {a} / {b} 种事物", { a: discoveredSet.size, b: ITEMS.length })}
           </div>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
             {ITEMS.map((def) => {
@@ -990,10 +1059,10 @@ export function ForestGame() {
                 >
                   <div className="text-2xl">{found ? def.icon : "❓"}</div>
                   <div className="mt-1 truncate text-xs font-semibold">
-                    {found ? def.name : "？？？"}
+                    {found ? tt(def.name) : "？？？"}
                   </div>
                   <div className="text-[10px] text-muted-foreground">
-                    {found ? (def.rarity === "rare" ? "稀有" : "普通") : "未发现"}
+                    {found ? (def.rarity === "rare" ? tt("稀有") : tt("普通")) : tt("未发现")}
                   </div>
                 </div>
               );
@@ -1004,7 +1073,7 @@ export function ForestGame() {
 
       {/* 小屋 */}
       {showHouse && (
-        <Modal onClose={() => setShowHouse(false)} title="🏠 小屋">
+        <Modal onClose={() => setShowHouse(false)} title={tt("🏠 小屋")}>
           {/* 切换标签 */}
           <div className="mb-3 flex gap-2">
             <button
@@ -1014,7 +1083,7 @@ export function ForestGame() {
                 houseTab === "furniture" ? "bg-orange-500/20 text-orange-200" : "bg-white/5 text-zinc-300 hover:bg-white/10",
               )}
             >
-              🛋️ 家具
+              🛋️ {tt("家具")}
             </button>
             <button
               onClick={() => setHouseTab("vending")}
@@ -1023,7 +1092,7 @@ export function ForestGame() {
                 houseTab === "vending" ? "bg-orange-500/20 text-orange-200" : "bg-white/5 text-zinc-300 hover:bg-white/10",
               )}
             >
-              🎰 售卖机
+              🎰 {tt("售卖机")}
             </button>
           </div>
 
@@ -1043,28 +1112,28 @@ export function ForestGame() {
                   </button>
                 ))}
               </div>
-              <div className="mt-2 text-xs text-muted-foreground">点已摆放的家具可收起</div>
+              <div className="mt-2 text-xs text-muted-foreground">{tt("点已摆放的家具可收起")}</div>
               <div className="mt-3 max-h-64 overflow-y-auto">
                 <div className="grid grid-cols-2 gap-2">
                   {FURNITURE.map((f) => {
                     const can = Object.entries(f.cost).every(([id, n]) => (inventory[id] ?? 0) >= (n ?? 0));
                     const costStr = Object.entries(f.cost)
-                      .map(([id, n]) => `${getItem(id).name}×${n}`)
+                      .map(([id, n]) => `${tt(getItem(id).name)}×${n}`)
                       .join(" + ");
                     return (
                       <div key={f.id} className="rounded-xl border border-white/10 bg-white/5 p-2">
                         <div className="flex items-center gap-2">
                           <span className="text-xl">{f.icon}</span>
-                          <span className="text-xs font-semibold">{f.name}</span>
+                          <span className="text-xs font-semibold">{tt(f.name)}</span>
                         </div>
                         <div className="mt-1 text-[10px] text-muted-foreground">{costStr}</div>
-                        {f.weird && <div className="mt-1 text-[10px] text-orange-300/80">{f.weird}</div>}
+                        {f.weird && <div className="mt-1 text-[10px] text-orange-300/80">{tt(f.weird)}</div>}
                         <button
                           onClick={() => placeFurniture(f.id)}
                           disabled={!can}
                           className="mt-1 w-full rounded-lg bg-orange-500 py-1 text-xs font-semibold text-black transition hover:bg-orange-400 disabled:opacity-40"
                         >
-                          {can ? "摆放" : "资源不足"}
+                          {can ? tt("摆放") : tt("资源不足")}
                         </button>
                       </div>
                     );
@@ -1075,7 +1144,7 @@ export function ForestGame() {
           ) : (
             <>
               <div className="mb-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-sm">
-                我的星星：<span className="font-bold text-yellow-300">⭐ {statsRef.current.stars ?? 0}</span>
+                {tf("我的星星：⭐ {n}", { n: statsRef.current.stars ?? 0 })}
               </div>
               <div className="mb-3 flex gap-2">
                 <button
@@ -1085,7 +1154,7 @@ export function ForestGame() {
                     vendingTab === "buy" ? "bg-yellow-500/20 text-yellow-200" : "bg-white/5 text-zinc-300 hover:bg-white/10",
                   )}
                 >
-                  🛒 购买
+                  🛒 {tt("购买")}
                 </button>
                 <button
                   onClick={() => setVendingTab("sell")}
@@ -1094,7 +1163,7 @@ export function ForestGame() {
                     vendingTab === "sell" ? "bg-yellow-500/20 text-yellow-200" : "bg-white/5 text-zinc-300 hover:bg-white/10",
                   )}
                 >
-                  💰 出售
+                  💰 {tt("出售")}
                 </button>
               </div>
               {vendingTab === "buy" ? (
@@ -1105,15 +1174,15 @@ export function ForestGame() {
                       <div key={p.id} className="rounded-xl border border-white/10 bg-white/5 p-2">
                         <div className="flex items-center gap-2">
                           <span className="text-xl">{p.icon}</span>
-                          <span className="text-xs font-semibold">{p.name}</span>
+                          <span className="text-xs font-semibold">{tt(p.name)}</span>
                         </div>
-                        <div className="mt-1 text-[10px] text-muted-foreground">{p.desc}</div>
+                        <div className="mt-1 text-[10px] text-muted-foreground">{tt(p.desc)}</div>
                         <button
                           onClick={() => buyProduct(p)}
                           disabled={!can}
                           className="mt-1 w-full rounded-lg bg-yellow-500 py-1 text-xs font-semibold text-black transition hover:bg-yellow-400 disabled:opacity-40"
                         >
-                          {can ? `购买 · ${p.cost}⭐` : `星星不足 ${p.cost}⭐`}
+                          {can ? tf("购买 · {n}⭐", { n: p.cost }) : tf("星星不足 {n}⭐", { n: p.cost })}
                         </button>
                       </div>
                     );
@@ -1122,7 +1191,7 @@ export function ForestGame() {
               ) : (
                 <div className="grid max-h-64 grid-cols-2 gap-2 overflow-y-auto">
                   {inventoryEntries.filter(([id, count]) => count > 0 && SELL_PRICES[id]).length === 0 ? (
-                    <p className="col-span-2 py-6 text-center text-sm text-muted-foreground">背包里没有可出售的东西。</p>
+                    <p className="col-span-2 py-6 text-center text-sm text-muted-foreground">{tt("背包里没有可出售的东西。")}</p>
                   ) : (
                     inventoryEntries
                       .filter(([id, count]) => count > 0 && SELL_PRICES[id])
@@ -1133,14 +1202,14 @@ export function ForestGame() {
                           <div key={id} className="rounded-xl border border-white/10 bg-white/5 p-2">
                             <div className="flex items-center gap-2">
                               <span className="text-xl">{def.icon}</span>
-                              <span className="text-xs font-semibold">{def.name}</span>
+                              <span className="text-xs font-semibold">{tt(def.name)}</span>
                               <span className="ml-auto text-[10px] text-zinc-400">×{count}</span>
                             </div>
                             <button
                               onClick={() => sellItem(id)}
                               className="mt-1 w-full rounded-lg bg-emerald-500 py-1 text-xs font-semibold text-black transition hover:bg-emerald-400"
                             >
-                              出售 · {price}⭐
+                              {tf("出售 · {n}⭐", { n: price })}
                             </button>
                           </div>
                         );
@@ -1148,7 +1217,7 @@ export function ForestGame() {
                   )}
                 </div>
               )}
-              <p className="mt-2 text-xs text-muted-foreground">去河边钓鱼能获得星星。</p>
+              <p className="mt-2 text-xs text-muted-foreground">{tt("去河边钓鱼能获得星星。")}</p>
             </>
           )}
         </Modal>
@@ -1223,6 +1292,7 @@ function Modal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const { tt } = useLang();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
@@ -1231,7 +1301,7 @@ function Modal({
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-bold">{title}</h2>
-          <button onClick={onClose} aria-label="关闭" className="rounded-lg p-1 text-muted-foreground hover:bg-white/10">
+          <button onClick={onClose} aria-label={tt("关闭")} className="rounded-lg p-1 text-muted-foreground hover:bg-white/10">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -1252,6 +1322,7 @@ function FishBiteBar({
 }) {
   const [cursor, setCursor] = useState(0.3);
   const dirRef = useRef(1);
+  const { tt } = useLang();
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -1274,12 +1345,12 @@ function FishBiteBar({
   return (
     <div className="pointer-events-auto absolute bottom-32 left-1/2 z-10 w-64 -translate-x-1/2 rounded-2xl border border-white/15 bg-black/40 p-3 backdrop-blur">
       <div className="mb-1 flex items-center justify-between text-xs text-zinc-200">
-        <span>🎣 鱼儿咬钩了！</span>
+        <span>🎣 {tt("鱼儿咬钩了！")}</span>
         <button
           onClick={onReel}
           className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-black transition hover:bg-emerald-400"
         >
-          收竿
+          {tt("收竿")}
         </button>
       </div>
       <div className="relative h-4 overflow-hidden rounded-full bg-white/10">
@@ -1292,7 +1363,7 @@ function FishBiteBar({
           style={{ left: `calc(${cursor * 100}% - 2px)` }}
         />
       </div>
-      <p className="mt-1 text-center text-[10px] text-zinc-400">指针落在绿色区时按 F / 点“收竿”</p>
+      <p className="mt-1 text-center text-[10px] text-zinc-400">{tt("指针落在绿色区时按 F / 点“收竿”")}</p>
     </div>
   );
 }
