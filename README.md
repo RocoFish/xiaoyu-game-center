@@ -1,6 +1,7 @@
 # 🏀 小鱼 Game Center
 
 一个可部署到公网的在线小游戏网站。
+已上线：https://xiaoyu-game-center-djqlq46tc-rf-3265.vercel.app/
 
 ## 功能
 
