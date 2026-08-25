@@ -4,9 +4,9 @@
   [English](README.md) | [中文](README.zh-CN.md)
 </p>
 
-A deployable online mini-game website.
+Visit ：https://xiaoyu-game-center-djqlq46tc-rf-3265.vercel.app/
 
-## Features
+A deployable online mini-game website.
 
 - **Basketball Challenge**: 60-second timed shooting with three difficulties (Easy / Normal / Hard), drag-to-aim, physics-based ball trajectory, backboard/rim collisions, and combo feedback (SWISH! +2, 🔥 N in a row).
 - **Accounts**: Supabase Auth sign-up / login / logout, with username and avatar settings.
