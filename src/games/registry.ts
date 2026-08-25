@@ -13,6 +13,8 @@ export interface GameDefinition {
   /** 卡片上的渐变点缀（Tailwind class）。 */
   accent: string;
   available: boolean;
+  /** 是否作为首页独立专区展示（不出现在普通游戏网格里）。 */
+  featured?: boolean;
   difficulty: Difficulty[];
 }
 
@@ -86,6 +88,17 @@ export const GAMES: GameDefinition[] = [
     accent: "from-slate-500/25 via-slate-500/5 to-transparent",
     available: true,
     difficulty: [],
+  },
+  {
+    id: "forest",
+    title: "森林里好像有什么",
+    slug: "forest",
+    description: "我只是来捡几根树枝的。",
+    emoji: "🌲",
+    accent: "from-green-700/30 via-green-600/5 to-transparent",
+    available: true,
+    difficulty: [],
+    featured: true,
   },
 ];
 

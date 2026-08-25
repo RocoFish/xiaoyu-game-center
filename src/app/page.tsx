@@ -31,14 +31,36 @@ export default function Home() {
         </div>
       </section>
 
+      {/* 森林特色专区（独立于其他游戏） */}
+      <section className="mt-12">
+        {GAMES.filter((g) => g.featured).map((g) => (
+          <Link
+            key={g.id}
+            href={`/games/${g.slug}`}
+            className="group block overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-green-900/70 via-green-800/20 to-transparent p-6 transition hover:border-green-400/40 sm:p-8"
+          >
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <span className="text-5xl">{g.emoji}</span>
+                <div>
+                  <h2 className="text-2xl font-black sm:text-3xl">《{g.title}》</h2>
+                  <p className="mt-1 text-sm text-muted-foreground sm:text-base">{g.description}</p>
+                </div>
+              </div>
+              <span className={buttonVariants({ size: "lg" })}>进入森林</span>
+            </div>
+          </Link>
+        ))}
+      </section>
+
       {/* 游戏选择区 */}
       <section id="games" className="mt-14 scroll-mt-16">
         <div className="flex items-end justify-between">
-          <h2 className="text-xl font-bold sm:text-2xl">游戏</h2>
+          <h2 className="text-xl font-bold sm:text-2xl">更多小游戏</h2>
           <span className="text-sm text-muted-foreground">更多小游戏持续上新</span>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {GAMES.map((g) => (
+          {GAMES.filter((g) => !g.featured).map((g) => (
             <GameCard key={g.id} game={g} />
           ))}
         </div>
