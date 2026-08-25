@@ -167,6 +167,8 @@ export function ForestGame() {
   const sleepTimerRef = useRef<number | null>(null);
   const sleepingRef = useRef(false);
   const lowEnergyWarnedRef = useRef(false);
+  const nearRiverHintedRef = useRef(false);
+  const nearHutHintedRef = useRef(false);
 
   useEffect(() => {
     userRef.current = user;
@@ -645,32 +647,22 @@ export function ForestGame() {
     };
   }, [startFish, reelFish]);
 
-  // ESC：优先关闭背包/图鉴/小屋弹窗，其次退出全屏
+  // ESC：优先关闭背包/图鉴/小屋弹窗（并尽量阻止页面退出全屏）；没弹窗时交给浏览器原生（ESC 退全屏）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (showInv) {
+      if (showInv || journal || showHouse) {
         e.preventDefault();
-        setShowInv(false);
+        e.stopPropagation();
+        if (showInv) setShowInv(false);
+        else if (journal) setJournal(false);
+        else setShowHouse(false);
         return;
       }
-      if (journal) {
-        e.preventDefault();
-        setJournal(false);
-        return;
-      }
-      if (showHouse) {
-        e.preventDefault();
-        setShowHouse(false);
-        return;
-      }
-      if (document.fullscreenElement) {
-        e.preventDefault();
-        void document.exitFullscreen();
-      }
+      // 没弹窗：不主动 exitFullscreen，让浏览器决定（原生全屏下按 ESC 即退出全屏）
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [showInv, journal, showHouse]);
 
   // 主循环：推进时间 / 天气 / 昼夜 / 神秘事件，移动玩家，自动拾取
@@ -732,6 +724,10 @@ export function ForestGame() {
         nearRiverRef.current = nearRiverNow;
         setNearRiver(nearRiverNow);
       }
+      if (nearRiverNow && !nearRiverHintedRef.current) {
+        nearRiverHintedRef.current = true;
+        showHint("🎣 到河边了，按 F（或点“钓鱼”）抛竿！", "ok");
+      }
 
       // 小屋门口检测（供进屋）
       const nearHutNow =
@@ -739,6 +735,10 @@ export function ForestGame() {
       if (nearHutNow !== nearHutRef.current) {
         nearHutRef.current = nearHutNow;
         setNearHut(nearHutNow);
+      }
+      if (nearHutNow && !nearHutHintedRef.current) {
+        nearHutHintedRef.current = true;
+        showHint("🏠 到家了～点“进入小屋”可以进去看看。", "ok");
       }
 
       // 能量 UI 节流刷新 + 低能量一次性提示
@@ -841,8 +841,8 @@ export function ForestGame() {
           {hint && (
             <div
               className={cn(
-                "pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full px-4 py-1.5 text-sm font-semibold backdrop-blur",
-                hint.kind === "ok" ? "bg-green-500/20 text-green-200" : "bg-amber-500/20 text-amber-200",
+                "pointer-events-none absolute bottom-20 left-1/2 z-10 -translate-x-1/2 rounded-full px-4 py-1.5 text-sm font-semibold backdrop-blur",
+                hint.kind === "ok" ? "bg-green-500/25 text-green-100" : "bg-amber-500/25 text-amber-100",
               )}
             >
               {hint.text}
@@ -853,9 +853,9 @@ export function ForestGame() {
           {nearHut && !inHouse && !sleeping && (
             <button
               onClick={enterHouse}
-              className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm font-semibold text-zinc-100 backdrop-blur transition hover:bg-black/50"
+              className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 flex items-center gap-2 rounded-2xl bg-amber-500/95 px-5 py-3 text-base font-bold text-black shadow-lg transition hover:bg-amber-400"
             >
-              🚪 进入小屋
+              <span className="text-lg">🚪</span> 进入小屋
             </button>
           )}
 
@@ -864,15 +864,15 @@ export function ForestGame() {
             <>
               <button
                 onClick={leaveHouse}
-                className="absolute left-2 top-2 z-10 rounded-full border border-white/15 bg-black/30 px-3 py-1.5 text-xs font-semibold text-zinc-100 backdrop-blur transition hover:bg-black/50"
+                className="absolute left-2 top-2 z-10 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-semibold text-zinc-100 backdrop-blur transition hover:bg-white/20"
               >
-                🚪 离开
+                🚪 离开小屋
               </button>
               <button
                 onClick={sleep}
-                className="absolute bottom-4 right-4 z-10 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm font-semibold text-zinc-100 backdrop-blur transition hover:bg-black/50"
+                className="absolute bottom-4 right-4 z-10 flex items-center gap-2 rounded-2xl bg-indigo-500/95 px-5 py-3 text-base font-bold text-white shadow-lg transition hover:bg-indigo-400"
               >
-                💤 休息
+                <span className="text-lg">💤</span> 上床休息
               </button>
             </>
           )}
@@ -894,9 +894,18 @@ export function ForestGame() {
                 if (fishPhase === "biting") reelFish();
                 else if (fishPhase === "idle") startFish();
               }}
-              className="absolute bottom-4 right-4 z-10 rounded-full border border-white/15 bg-black/30 px-4 py-2 text-sm font-semibold text-zinc-100 backdrop-blur transition hover:bg-black/50"
+              className={cn(
+                "absolute bottom-4 right-4 z-10 flex items-center gap-2 rounded-2xl px-5 py-3 text-base font-bold shadow-lg transition",
+                fishPhase === "biting"
+                  ? "bg-yellow-400 text-black hover:bg-yellow-300"
+                  : "bg-emerald-500/95 text-white hover:bg-emerald-400",
+              )}
             >
-              {fishPhase === "biting" ? "🎣 收竿！" : fishPhase === "casting" ? "⏳ 等待…" : "🎣 钓鱼"}
+              {fishPhase === "idle" && <span className="text-lg">🎣</span>}
+              <span>{fishPhase === "biting" ? "🎣 收竿！" : fishPhase === "casting" ? "⏳ 等待…" : "钓鱼"}</span>
+              {fishPhase !== "casting" && (
+                <kbd className="rounded-md bg-black/25 px-1.5 py-0.5 text-xs font-bold">F</kbd>
+              )}
             </button>
           )}
 
@@ -913,9 +922,14 @@ export function ForestGame() {
           <Joystick onMove={(x, y) => (joyVecRef.current = { x, y })} />
         </div>
 
-        <p className="text-center text-xs text-zinc-500">
-          WASD / 方向键移动 · 走近物品自动拾取 · 到河边按 F 钓鱼 · E/I 开背包 · ESC 关弹窗/退出全屏
-        </p>
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-center text-[11px] text-zinc-400">
+          <span><kbd className="rounded bg-white/10 px-1">WASD</kbd>/<kbd className="rounded bg-white/10 px-1">方向键</kbd> 移动</span>
+          <span><kbd className="rounded bg-white/10 px-1">F</kbd> 钓鱼</span>
+          <span><kbd className="rounded bg-white/10 px-1">E</kbd>/<kbd className="rounded bg-white/10 px-1">I</kbd> 背包</span>
+          <span>走近自动拾取</span>
+          <span>靠近门口 🚪 进小屋</span>
+          <span><kbd className="rounded bg-white/10 px-1">ESC</kbd> 先关弹窗 · 再退全屏</span>
+        </div>
 
       {/* 背包 */}
       {showInv && (
@@ -1258,7 +1272,7 @@ function FishBiteBar({
   const [lo, hi] = zone;
 
   return (
-    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-10 w-64 -translate-x-1/2 rounded-2xl border border-white/15 bg-black/40 p-3 backdrop-blur">
+    <div className="pointer-events-auto absolute bottom-32 left-1/2 z-10 w-64 -translate-x-1/2 rounded-2xl border border-white/15 bg-black/40 p-3 backdrop-blur">
       <div className="mb-1 flex items-center justify-between text-xs text-zinc-200">
         <span>🎣 鱼儿咬钩了！</span>
         <button
