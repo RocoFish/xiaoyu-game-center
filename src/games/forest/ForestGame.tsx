@@ -1,22 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { X, Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { ITEMS, getItem, type ItemDef } from "./items";
 import { FURNITURE, getFurniture } from "./house";
+import { ForestScene3D, type MysteryMarker } from "./Scene3D";
 import {
-  MAP_H,
-  MAP_W,
-  PLAYER_RADIUS,
   TILE,
-  TYPES,
   CATEGORY,
   addItemAt,
   createWorld,
   movePlayer,
+  pickupNearby,
   removeItem,
   tileAt,
   isWalkableTile,
@@ -61,35 +59,11 @@ function timeLabel(p: number): string {
   return "夜晚";
 }
 
-function skyColor(p: number): string {
-  if (p < 0.25) return "rgba(255, 220, 150, 0.16)";
-  if (p < 0.55) return "rgba(255, 255, 255, 0)";
-  if (p < 0.78) return "rgba(255, 130, 60, 0.26)";
-  return "rgba(8, 16, 50, 0.5)";
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  seed: number;
-}
-
-function makeParticles(n: number, w: number, h: number): Particle[] {
-  const arr: Particle[] = [];
-  for (let i = 0; i < n; i++) {
-    arr.push({ x: Math.random() * w, y: Math.random() * h, vx: 0, vy: 0, seed: Math.random() * 10 });
-  }
-  return arr;
-}
-
 export function ForestGame() {
   const { user } = useAuth();
 
   const worldRef = useRef<World>(null as unknown as World);
   if (!worldRef.current) worldRef.current = createWorld();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
   const lastTsRef = useRef(0);
   const keyVecRef = useRef({ x: 0, y: 0 });
@@ -97,17 +71,14 @@ export function ForestGame() {
   const timeRef = useRef(0);
   const weatherRef = useRef<"sunny" | "rain">("sunny");
   const weatherTimerRef = useRef(45 + Math.random() * 30);
-  const firefliesRef = useRef<Particle[]>([]);
-  const butterfliesRef = useRef<Particle[]>([]);
-  const rainRef = useRef<Particle[]>([]);
   const statsRef = useRef<StatState>(loadJson(STATS_KEY, {}));
   const reactedRef = useRef<Set<string>>(new Set());
-  const mysteryRef = useRef<{ x: number; y: number; icon: string; text: string }[]>([]);
+  const mysteryRef = useRef<MysteryMarker[]>([]);
   const eventTimerRef = useRef(28 + Math.random() * 20);
+  const saveTimerRef = useRef<number | null>(null);
+  const userRef = useRef(user);
 
-  const [inventory, setInventory] = useState<Record<string, number>>(() =>
-    loadJson(INV_KEY, {}),
-  );
+  const [inventory, setInventory] = useState<Record<string, number>>(() => loadJson(INV_KEY, {}));
   const [discovered, setDiscovered] = useState<string[]>(() => loadJson(DISC_KEY, []));
   const [showInv, setShowInv] = useState(false);
   const [journal, setJournal] = useState<boolean>(false);
@@ -120,11 +91,24 @@ export function ForestGame() {
     mushroom: 0,
     visit: 0,
   });
-  const saveTimerRef = useRef<number | null>(null);
+
+  // 3D 世界"实体版本号"：物品 / 神秘标记变化时递增，驱动 3D 层重渲染。
+  const [worldVersion, setWorldVersion] = useState(0);
+  const playerDirRef = useRef({ x: 0, z: 1 });
+
+  // 全屏
+  const gameRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // 天气/昼夜显示（节流更新 UI）
   const [weatherUI, setWeatherUI] = useState<"sunny" | "rain">("sunny");
   const [timeUI, setTimeUI] = useState("白天");
+
+  const hintTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const saveInv = useCallback((next: Record<string, number>) => {
     setInventory(next);
@@ -137,7 +121,8 @@ export function ForestGame() {
 
   const showHint = useCallback((text: string, kind: "ok" | "warn") => {
     setHint({ text, kind });
-    window.setTimeout(() => setHint(null), 2400);
+    if (hintTimerRef.current) window.clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = window.setTimeout(() => setHint(null), 2400);
   }, []);
 
   const discover = useCallback((itemId: string) => {
@@ -200,6 +185,45 @@ export function ForestGame() {
       }
     }
   }, []);
+
+  // 拾取物品：移除 + 背包 + 图鉴 + 统计 + 森林记忆 + 全球统计 + 提示，并驱动 3D 重渲染
+  const pickUpItem = useCallback(
+    (item: WorldItem) => {
+      const w = worldRef.current;
+      removeItem(w, item);
+      const def = getItem(item.itemId);
+      setInventory((prev) => {
+        const next = { ...prev, [item.itemId]: (prev[item.itemId] ?? 0) + 1 };
+        try {
+          localStorage.setItem(INV_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+      discover(item.itemId);
+      const cat = CATEGORY[item.itemId];
+      if (cat) statsRef.current[cat as keyof StatState] = (statsRef.current[cat as keyof StatState] ?? 0) + 1;
+      const night = (timeRef.current % DAY_CYCLE) / DAY_CYCLE >= 0.78;
+      if (night) statsRef.current.night = (statsRef.current.night ?? 0) + 1;
+      saveStats();
+      checkResponses();
+      if (userRef.current) {
+        void fetch("/api/forest/activity", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: cat === "mushroom" ? "mushroom" : "pickup" }),
+        }).catch(() => {});
+      }
+      showHint(
+        `${def.icon} 拾起「${def.name}」${def.rarity === "rare" ? "（稀有！）" : ""}` +
+          (night && def.rarity === "rare" ? " · 月光下它似乎更亮了" : ""),
+        "ok",
+      );
+      setWorldVersion((v) => v + 1);
+    },
+    [discover, saveStats, checkResponses, showHint],
+  );
 
   // 登录用户：加载 / 保存森林（Supabase forest_state）
   useEffect(() => {
@@ -299,7 +323,24 @@ export function ForestGame() {
     try { localStorage.setItem("forest_house", JSON.stringify(nextHouse)); } catch {}
   }, [house]);
 
-  // 键盘
+  // 全屏
+  const toggleFullscreen = useCallback(() => {
+    const el = gameRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void el.requestFullscreen?.();
+    }
+  }, []);
+
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
+  // 键盘：移动
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
@@ -324,203 +365,36 @@ export function ForestGame() {
     };
   }, []);
 
-  // 主循环
+  // ESC：优先关闭背包/图鉴/小屋弹窗，其次退出全屏
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const W = MAP_W * TILE;
-    const H = MAP_H * TILE;
-    firefliesRef.current = makeParticles(12, W, H);
-    butterfliesRef.current = makeParticles(6, W, H);
-    rainRef.current = makeParticles(36, W, H);
-
-    const drawItem = (it: WorldItem, p: number) => {
-      const def = getItem(it.itemId);
-      ctx.font = `${Math.floor(TILE * 0.7)}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(def.icon, it.x, it.y);
-      if (def.rarity === "rare") {
-        const glow = p >= 0.78 ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)";
-        ctx.strokeStyle = glow;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(it.x, it.y, TILE * 0.42, 0, Math.PI * 2);
-        ctx.stroke();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (showInv) {
+        e.preventDefault();
+        setShowInv(false);
+        return;
+      }
+      if (journal) {
+        e.preventDefault();
+        setJournal(false);
+        return;
+      }
+      if (showHouse) {
+        e.preventDefault();
+        setShowHouse(false);
+        return;
+      }
+      if (document.fullscreenElement) {
+        e.preventDefault();
+        void document.exitFullscreen();
       }
     };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showInv, journal, showHouse]);
 
-    const draw = () => {
-      const dpr = window.devicePixelRatio || 1;
-      if (canvas.width !== Math.round(W * dpr)) {
-        canvas.width = Math.round(W * dpr);
-        canvas.height = Math.round(H * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      }
-      const w = worldRef.current;
-      const p = (timeRef.current % DAY_CYCLE) / DAY_CYCLE;
-
-      ctx.fillStyle = "#3f7d3a";
-      ctx.fillRect(0, 0, W, H);
-      for (let ty = 0; ty < MAP_H; ty++) {
-        for (let tx = 0; tx < MAP_W; tx++) {
-          const t = w.map[ty][tx];
-          const x = tx * TILE;
-          const y = ty * TILE;
-          if (t === TYPES.TREE) {
-            ctx.fillStyle = "#2f5f2f";
-            ctx.fillRect(x, y, TILE, TILE);
-            ctx.fillStyle = "#1f4a20";
-            ctx.beginPath();
-            ctx.arc(x + TILE / 2, y + TILE / 2, TILE * 0.42, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = "#7c4a1f";
-            ctx.fillRect(x + TILE / 2 - 3, y + TILE / 2 + 6, 6, TILE * 0.35);
-          } else if (t === TYPES.WATER) {
-            ctx.fillStyle = "#3b7fb0";
-            ctx.fillRect(x, y, TILE, TILE);
-            ctx.fillStyle = "rgba(255,255,255,0.25)";
-            ctx.fillRect(x + 4, y + TILE / 2 - 2, TILE - 8, 4);
-          } else if (t === TYPES.PATH) {
-            ctx.fillStyle = "#b9986a";
-            ctx.fillRect(x, y, TILE, TILE);
-          } else if (t === TYPES.FLOWER) {
-            ctx.fillStyle = "#4e9248";
-            ctx.fillRect(x, y, TILE, TILE);
-            ctx.font = "14px sans-serif";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText("🌼", x + TILE / 2, y + TILE / 2);
-          } else if (t === TYPES.HUT) {
-            ctx.fillStyle = "#8a5a2b";
-            ctx.fillRect(x + 2, y + 8, TILE - 4, TILE - 10);
-            ctx.fillStyle = "#a06a38";
-            ctx.beginPath();
-            ctx.moveTo(x, y + 10);
-            ctx.lineTo(x + TILE / 2, y - 6);
-            ctx.lineTo(x + TILE, y + 10);
-            ctx.closePath();
-            ctx.fill();
-          }
-        }
-      }
-      // 水坑（下雨）
-      if (weatherRef.current === "rain") {
-        ctx.fillStyle = "rgba(120,180,220,0.3)";
-        for (let i = 0; i < 6; i++) {
-          const px = ((i * 73 + 40) % (MAP_W * TILE));
-          const py = ((i * 131 + 60) % (MAP_H * TILE));
-          ctx.beginPath();
-          ctx.ellipse(px, py, 24, 8, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      // 物品
-      for (const it of w.items) drawItem(it, p);
-      // 玩家
-      ctx.fillStyle = "#f4a261";
-      ctx.beginPath();
-      ctx.arc(w.player.x, w.player.y, PLAYER_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#2a2a2a";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // 天空色调（昼夜）
-      ctx.fillStyle = skyColor(p);
-      ctx.fillRect(0, 0, W, H);
-    };
-
-    const updateParticles = (dt: number) => {
-      const W = MAP_W * TILE;
-      const H = MAP_H * TILE;
-      const p = (timeRef.current % DAY_CYCLE) / DAY_CYCLE;
-
-      // 雨滴
-      for (const d of rainRef.current) {
-        d.y += 420 * dt;
-        d.x += 60 * dt;
-        if (d.y > H) {
-          d.y = -10;
-          d.x = Math.random() * W;
-          d.vy = 0;
-        }
-      }
-      // 萤火虫（黄昏/夜晚）
-      const firefly = p >= 0.55;
-      if (firefly) {
-        for (const f of firefliesRef.current) {
-          f.x += Math.sin(timeRef.current * 0.7 + f.seed) * 12 * dt;
-          f.y += Math.cos(timeRef.current * 0.5 + f.seed) * 10 * dt;
-          if (f.x < 0) f.x = W;
-          if (f.x > W) f.x = 0;
-          if (f.y < 0) f.y = H;
-          if (f.y > H) f.y = 0;
-        }
-      }
-      // 蝴蝶（晴天/白天）
-      if (weatherRef.current === "sunny" && p >= 0.1 && p < 0.55) {
-        for (const b of butterfliesRef.current) {
-          b.x += Math.sin(timeRef.current * 0.9 + b.seed) * 30 * dt;
-          b.y += Math.cos(timeRef.current * 0.7 + b.seed) * 20 * dt;
-          if (b.x < 0) b.x = W;
-          if (b.x > W) b.x = 0;
-          if (b.y < 0) b.y = H;
-          if (b.y > H) b.y = 0;
-        }
-      }
-    };
-
-    const drawParticles = (now: number) => {
-      const p = (timeRef.current % DAY_CYCLE) / DAY_CYCLE;
-      // 雨
-      if (weatherRef.current === "rain") {
-        ctx.strokeStyle = "rgba(180,200,255,0.45)";
-        ctx.lineWidth = 1.5;
-        for (const d of rainRef.current) {
-          ctx.beginPath();
-          ctx.moveTo(d.x, d.y);
-          ctx.lineTo(d.x + 4, d.y + 12);
-          ctx.stroke();
-        }
-      }
-      // 萤火虫
-      if (p >= 0.55) {
-        for (const f of firefliesRef.current) {
-          const a = 0.4 + 0.5 * Math.abs(Math.sin(now * 0.004 + f.seed));
-          ctx.fillStyle = `rgba(255, 230, 120, ${a.toFixed(2)})`;
-          ctx.beginPath();
-          ctx.arc(f.x, f.y, 2.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      // 蝴蝶
-      if (weatherRef.current === "sunny" && p >= 0.1 && p < 0.55) {
-        for (const b of butterfliesRef.current) {
-          ctx.fillStyle = "rgba(255, 200, 120, 0.85)";
-          const flap = Math.abs(Math.sin(now * 0.01 + b.seed)) * 3 + 1;
-          ctx.beginPath();
-          ctx.ellipse(b.x - flap, b.y, flap, 3, -0.4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.ellipse(b.x + flap, b.y, flap, 3, 0.4, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      // 神秘事件标记
-      for (const m of mysteryRef.current) {
-        ctx.globalAlpha = 0.8 + 0.2 * Math.abs(Math.sin(now * 0.005));
-        ctx.font = "18px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(m.icon, m.x, m.y);
-        ctx.globalAlpha = 1;
-      }
-    };
-
+  // 主循环：推进时间 / 天气 / 昼夜 / 神秘事件，移动玩家，自动拾取
+  useEffect(() => {
     const loop = (now: number) => {
       const dt = lastTsRef.current ? Math.min((now - lastTsRef.current) / 1000, 0.05) : 0;
       lastTsRef.current = now;
@@ -530,6 +404,7 @@ export function ForestGame() {
       if (eventTimerRef.current <= 0) {
         eventTimerRef.current = 35 + Math.random() * 30;
         if (Math.random() < 0.65) spawnMystery();
+        setWorldVersion((v) => v + 1);
       }
       weatherTimerRef.current -= dt;
       if (weatherTimerRef.current <= 0) {
@@ -545,74 +420,26 @@ export function ForestGame() {
       const vy = keyVecRef.current.y + joyVecRef.current.y;
       if (vx !== 0 || vy !== 0) movePlayer(worldRef.current, vx, vy, dt);
 
-      updateParticles(dt);
-      draw();
-      drawParticles(now);
+      // 自动拾取：走近物品直接捡起（无需点击）
+      const near = pickupNearby(worldRef.current);
+      if (near) pickUpItem(near);
+
+      // 神秘事件：靠近时揭示
+      const w = worldRef.current;
+      for (let i = mysteryRef.current.length - 1; i >= 0; i--) {
+        const m = mysteryRef.current[i];
+        if (Math.hypot(m.x - w.player.x, m.y - w.player.y) < TILE * 1.2) {
+          mysteryRef.current.splice(i, 1);
+          showHint(`${m.icon} ${m.text}`, "warn");
+          setWorldVersion((v) => v + 1);
+        }
+      }
+
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, []);
-
-  const onCanvasTap = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const px = ((e.clientX - rect.left) / rect.width) * MAP_W * TILE;
-      const py = ((e.clientY - rect.top) / rect.height) * MAP_H * TILE;
-      const world = worldRef.current;
-
-      // 神秘事件标记
-      const mIdx = mysteryRef.current.findIndex((m) => Math.hypot(m.x - px, m.y - py) < TILE * 0.6);
-      if (mIdx >= 0) {
-        const m = mysteryRef.current[mIdx];
-        mysteryRef.current.splice(mIdx, 1);
-        showHint(`${m.icon} ${m.text}`, "warn");
-        return;
-      }
-
-      let target: WorldItem | null = null;
-      let best = TILE * 0.55;
-      for (const it of world.items) {
-        const d = Math.hypot(it.x - px, it.y - py);
-        if (d <= best) {
-          best = d;
-          target = it;
-        }
-      }
-      if (!target) return;
-      const pdist = Math.hypot(target.x - world.player.x, target.y - world.player.y);
-      if (pdist > TILE * 1.7) {
-        showHint("走近一点才能捡起", "warn");
-        return;
-      }
-      const def = getItem(target.itemId);
-      removeItem(world, target);
-      const next = { ...inventory, [target.itemId]: (inventory[target.itemId] ?? 0) + 1 };
-      saveInv(next);
-      discover(target.itemId);
-      const cat = CATEGORY[target.itemId];
-      if (cat) {
-        statsRef.current[cat as keyof StatState] = (statsRef.current[cat as keyof StatState] ?? 0) + 1;
-      }
-      const night = (timeRef.current % DAY_CYCLE) / DAY_CYCLE >= 0.78;
-      if (night) statsRef.current.night = (statsRef.current.night ?? 0) + 1;
-      saveStats();
-      checkResponses();
-      if (user) {
-        void fetch("/api/forest/activity", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: cat === "mushroom" ? "mushroom" : "pickup" }),
-        }).catch(() => {});
-      }
-      showHint(
-        `${def.icon} 拾起「${def.name}」${def.rarity === "rare" ? "（稀有！）" : ""}` +
-          (night && def.rarity === "rare" ? " · 月光下它似乎更亮了" : ""),
-        "ok",
-      );
-    },
-    [inventory, saveInv, showHint, discover, user],
-  );
+  }, [spawnMystery, pickUpItem, showHint]);
 
   const inventoryEntries = Object.entries(inventory).sort((a, b) => {
     const ra = getItem(a[0]).rarity === "rare" ? 1 : 0;
@@ -623,67 +450,88 @@ export function ForestGame() {
 
   return (
     <div className="mx-auto w-full max-w-[760px]">
-      {/* 顶部栏 */}
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>🕐 {timeUI}</span>
-          <span>{weatherUI === "rain" ? "🌧️ 下雨" : "☀️ 晴朗"}</span>
-          <span className="hidden sm:inline">
-            {user ? "已登录" : "游客"}
-          </span>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setJournal(true)}
-            className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
-          >
-            📖 图鉴
-          </button>
-          <button
-            onClick={() => setShowInv(true)}
-            className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
-          >
-            🎒 背包
-          </button>
-          <button
-            onClick={() => setShowHouse(true)}
-            className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
-          >
-            🏠 小屋
-          </button>
-        </div>
-      </div>
-
-      {/* 全球今日统计 */}
-      <div className="mb-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-xs text-zinc-300">
-        🌍 今日全部玩家：捡起 {globalStats.pickup} · 蘑菇 {globalStats.mushroom} · 探索 {globalStats.visit}
-      </div>
-
-      {/* 森林画布 */}
-      <div className="relative aspect-[26/18] w-full overflow-hidden rounded-2xl border border-white/10 bg-[#22401f] shadow-xl">
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 h-full w-full touch-none select-none"
-          onPointerDown={onCanvasTap}
-        />
-
-        {hint && (
-          <div
-            className={cn(
-              "pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full px-4 py-1.5 text-sm font-semibold backdrop-blur",
-              hint.kind === "ok" ? "bg-green-500/20 text-green-200" : "bg-amber-500/20 text-amber-200",
-            )}
-          >
-            {hint.text}
+      <div
+        ref={gameRef}
+        className={cn("flex flex-col gap-3", isFullscreen && "h-full min-h-0")}
+      >
+        {/* 顶部栏 */}
+        <div className="mb-1 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>🕐 {timeUI}</span>
+            <span>{weatherUI === "rain" ? "🌧️ 下雨" : "☀️ 晴朗"}</span>
+            <span className="hidden sm:inline">{user ? "已登录" : "游客"}</span>
           </div>
-        )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setJournal(true)}
+              className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
+            >
+              📖 图鉴
+            </button>
+            <button
+              onClick={() => setShowInv(true)}
+              className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
+            >
+              🎒 背包
+            </button>
+            <button
+              onClick={() => setShowHouse(true)}
+              className="rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-zinc-100 transition hover:bg-white/20"
+            >
+              🏠 小屋
+            </button>
+          </div>
+        </div>
 
-        <Joystick onMove={(x, y) => (joyVecRef.current = { x, y })} />
-      </div>
+        {/* 全球今日统计 */}
+        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-xs text-zinc-300">
+          🌍 今日全部玩家：捡起 {globalStats.pickup} · 蘑菇 {globalStats.mushroom} · 探索 {globalStats.visit}
+        </div>
 
-      <p className="mt-3 text-center text-xs text-zinc-500">
-        WASD / 方向键移动 · 手机拖左下摇杆 · 点击物品捡起（需靠近）· E/I 开背包
-      </p>
+        {/* 3D 森林 */}
+        <div
+          className={cn(
+            "relative w-full overflow-hidden rounded-2xl border border-white/10 bg-[#22401f] shadow-xl",
+            isFullscreen ? "min-h-0 flex-1" : "aspect-[26/18]",
+          )}
+        >
+          <div className="absolute inset-0">
+            <ForestScene3D
+              world={worldRef.current}
+              timeRef={timeRef}
+              weatherRef={weatherRef}
+              mysteryRef={mysteryRef}
+              worldVersion={worldVersion}
+              playerDirRef={playerDirRef}
+            />
+          </div>
+
+          {/* 全屏按钮 */}
+          <button
+            onClick={toggleFullscreen}
+            aria-label={isFullscreen ? "退出全屏" : "全屏"}
+            className="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 bg-black/30 text-zinc-200 transition hover:bg-black/50"
+          >
+            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+
+          {hint && (
+            <div
+              className={cn(
+                "pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full px-4 py-1.5 text-sm font-semibold backdrop-blur",
+                hint.kind === "ok" ? "bg-green-500/20 text-green-200" : "bg-amber-500/20 text-amber-200",
+              )}
+            >
+              {hint.text}
+            </div>
+          )}
+
+          <Joystick onMove={(x, y) => (joyVecRef.current = { x, y })} />
+        </div>
+
+        <p className="text-center text-xs text-zinc-500">
+          WASD / 方向键移动 · 手机拖左下摇杆 · 走近物品自动拾取 · E/I 开背包 · ESC 关弹窗/退出全屏
+        </p>
 
       {/* 背包 */}
       {showInv && (
@@ -803,6 +651,7 @@ export function ForestGame() {
           </div>
         </Modal>
       )}
+      </div>
     </div>
   );
 }
