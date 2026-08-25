@@ -22,6 +22,11 @@ export const ITEMS: ItemDef[] = [
   { id: "strange_feather", name: "奇怪的羽毛", icon: "🖋️", rarity: "rare", description: "森林里没有这种鸟。" },
   { id: "moon_stone", name: "月光石", icon: "🌙", rarity: "rare", description: "月亮出来的时候，它会亮一下。" },
   { id: "strange_seed", name: "奇怪的种子", icon: "🌱", rarity: "rare", description: "不知道会长出什么。" },
+  { id: "carp", name: "鲤鱼", icon: "🐟", rarity: "common", description: "扑通一声，又跳回水里去了。" },
+  { id: "bass", name: "鲈鱼", icon: "🐠", rarity: "common", description: "最合适红烧的那一种。" },
+  { id: "puffer", name: "气鼓鼓", icon: "🐡", rarity: "common", description: "你一碰它，它就鼓起来了。" },
+  { id: "goldfish", name: "小金鱼", icon: "🧡", rarity: "rare", description: "金色的，闪亮亮的。" },
+  { id: "glowfish", name: "发光鱼", icon: "✨", rarity: "rare", description: "夜里看它，自己也亮了起来。" },
 ];
 
 export const ITEM_MAP: Record<string, ItemDef> = Object.fromEntries(

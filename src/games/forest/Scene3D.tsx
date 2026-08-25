@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { MAP_W, MAP_H, TILE, TYPES, type World, type WorldItem } from "./engine";
+import { MAP_W, MAP_H, TILE, TYPES, RIVER_X, HUT_CENTER, type World, type WorldItem } from "./engine";
 import { getItem } from "./items";
 
 export interface MysteryMarker {
@@ -25,6 +25,14 @@ interface SceneProps {
   worldVersion: number;
   /** 最近一次移动方向（用于角色朝向）。 */
   playerDirRef: { current: { x: number; z: number } };
+  /** 是否处于"走进小屋"的屋内视角。 */
+  houseView: boolean;
+  /** 已摆放的家具 id 列表。 */
+  houseFurniture: (string | null)[];
+  /** 点击售卖机。 */
+  onVendingMachine: () => void;
+  /** 点击床铺休息。 */
+  onBed: () => void;
 }
 
 const DAY_CYCLE = 240;
@@ -163,11 +171,52 @@ function Hut({ x, z }: { x: number; z: number }) {
   );
 }
 
+function PlayerModel() {
+  return (
+    <>
+      {/* 身体 */}
+      <mesh position={[0, 0.55, 0]} castShadow>
+        <cylinderGeometry args={[0.27, 0.35, 0.85, 10]} />
+        <meshLambertMaterial color="#f4a261" flatShading />
+      </mesh>
+      {/* 头 */}
+      <mesh position={[0, 1.3, 0]} castShadow>
+        <sphereGeometry args={[0.27, 10, 8]} />
+        <meshLambertMaterial color="#fce4c1" flatShading />
+      </mesh>
+      {/* 贝雷帽 */}
+      <mesh position={[0, 1.56, 0]}>
+        <sphereGeometry args={[0.24, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshLambertMaterial color="#e07a5f" flatShading />
+      </mesh>
+      {/* 眼睛 */}
+      <mesh position={[0.1, 1.34, 0.23]}>
+        <sphereGeometry args={[0.045, 6, 5]} />
+        <meshLambertMaterial color="#2b2017" />
+      </mesh>
+      <mesh position={[-0.1, 1.34, 0.23]}>
+        <sphereGeometry args={[0.045, 6, 5]} />
+        <meshLambertMaterial color="#2b2017" />
+      </mesh>
+      {/* 腮红 */}
+      <mesh position={[0.18, 1.24, 0.2]}>
+        <sphereGeometry args={[0.05, 6, 5]} />
+        <meshLambertMaterial color="#f2a3a3" />
+      </mesh>
+      <mesh position={[-0.18, 1.24, 0.2]}>
+        <sphereGeometry args={[0.05, 6, 5]} />
+        <meshLambertMaterial color="#f2a3a3" />
+      </mesh>
+    </>
+  );
+}
+
 function Player({ world, dirRef }: { world: World; dirRef: { current: { x: number; z: number } } }) {
   const ref = useRef<THREE.Group>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
   const last = useRef({ x: 0, z: 0 });
 
-  useFrame(() => {
+  useFrame((state) => {
     const g = ref.current;
     if (!g) return;
     const tx = world.player.x / TILE;
@@ -182,29 +231,24 @@ function Player({ world, dirRef }: { world: World; dirRef: { current: { x: numbe
       last.current = { x: tx, z: tz };
       dirRef.current = { x: dx, z: dz };
     }
+    // 脚下高亮圈轻微呼吸
+    if (glowRef.current) {
+      const t = state.clock.elapsedTime;
+      const m = glowRef.current.material as THREE.MeshBasicMaterial;
+      m.opacity = 0.32 + 0.16 * Math.abs(Math.sin(t * 2.5));
+    }
   });
 
   return (
     <group ref={ref}>
-      {/* 身体 */}
-      <mesh position={[0, 0.5, 0]} castShadow>
-        <cylinderGeometry args={[0.24, 0.3, 0.7, 8]} />
-        <meshLambertMaterial color="#f4a261" flatShading />
+      {/* 脚下高亮圈：一眼认出"这是我" */}
+      <mesh ref={glowRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+        <ringGeometry args={[0.42, 0.72, 26]} />
+        <meshBasicMaterial color="#ffe08a" transparent opacity={0.45} toneMapped={false} depthWrite={false} />
       </mesh>
-      {/* 头 */}
-      <mesh position={[0, 1.05, 0]} castShadow>
-        <sphereGeometry args={[0.22, 8, 6]} />
-        <meshLambertMaterial color="#fce4c1" flatShading />
-      </mesh>
-      {/* 眼睛（小圆点，位于 +Z 方向） */}
-      <mesh position={[0.08, 1.08, 0.19]}>
-        <sphereGeometry args={[0.035, 6, 5]} />
-        <meshLambertMaterial color="#3a2b1f" />
-      </mesh>
-      <mesh position={[-0.08, 1.08, 0.19]}>
-        <sphereGeometry args={[0.035, 6, 5]} />
-        <meshLambertMaterial color="#3a2b1f" />
-      </mesh>
+      {/* 随身暖光：夜里也醒目 */}
+      <pointLight position={[0, 1.5, 0]} intensity={1.5} distance={7} color="#ffd9a0" />
+      <PlayerModel />
     </group>
   );
 }
@@ -371,21 +415,197 @@ function Rain({ timeRef, weatherRef }: { timeRef: { current: number }; weatherRe
   );
 }
 
-// ---- 相机：固定俯视三分视角，逐帧保证框住整个森林 ----
-function CameraRig() {
+// ---- 屋内：房间 + 售卖机 + 床 + 家具 + 主角 ----
+
+function VendingMachine({ onVending }: { onVending: () => void }) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame((state) => {
+    const g = ref.current;
+    if (!g) return;
+    const t = state.clock.elapsedTime;
+    const screen = g.getObjectByName("screen") as THREE.Mesh | undefined;
+    if (screen) {
+      (screen.material as THREE.MeshBasicMaterial).color.setHSL(0.5, 0.9, 0.38 + 0.1 * Math.abs(Math.sin(t * 2)));
+    }
+  });
+  return (
+    <group ref={ref} position={[0, 0, -1.55]}>
+      {/* 机身 */}
+      <mesh
+        position={[0, 1.05, 0]}
+        castShadow
+        onClick={(e) => {
+          e.stopPropagation();
+          onVending();
+        }}
+      >
+        <boxGeometry args={[1.3, 2.1, 0.85]} />
+        <meshLambertMaterial color="#3aa7b0" flatShading />
+      </mesh>
+      {/* 屏幕 */}
+      <mesh name="screen" position={[0, 1.6, 0.44]}>
+        <planeGeometry args={[1.0, 0.6]} />
+        <meshBasicMaterial color="#13d2ff" toneMapped={false} />
+      </mesh>
+      {/* 按钮带 */}
+      <mesh position={[0, 1.02, 0.44]}>
+        <boxGeometry args={[0.7, 0.16, 0.04]} />
+        <meshBasicMaterial color="#ffe08a" toneMapped={false} />
+      </mesh>
+      {/* 取货口 */}
+      <mesh position={[0, 0.4, 0.44]}>
+        <boxGeometry args={[0.9, 0.32, 0.04]} />
+        <meshLambertMaterial color="#163f4a" />
+      </mesh>
+      {/* 顶灯 */}
+      <pointLight position={[0, 2.3, 0.5]} intensity={0.9} distance={4} color="#dff7ff" />
+      {/* 取货提示圈 */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <ringGeometry args={[0.95, 1.15, 20]} />
+        <meshBasicMaterial color="#ffd166" transparent opacity={0.4} toneMapped={false} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
+
+function Bed({ onBed }: { onBed: () => void }) {
+  return (
+    <group position={[-1.55, 0, 0.9]} rotation={[0, Math.PI / 2, 0]}>
+      <mesh
+        position={[0, 0.15, 0]}
+        castShadow
+        onClick={(e) => {
+          e.stopPropagation();
+          onBed();
+        }}
+      >
+        <boxGeometry args={[2.0, 0.3, 1.1]} />
+        <meshLambertMaterial color="#8b5a2b" flatShading />
+      </mesh>
+      {/* 床垫 */}
+      <mesh position={[0, 0.42, 0]}>
+        <boxGeometry args={[1.85, 0.24, 0.95]} />
+        <meshLambertMaterial color="#f6e7d5" flatShading />
+      </mesh>
+      {/* 毯子 */}
+      <mesh position={[0.2, 0.56, 0]}>
+        <boxGeometry args={[1.1, 0.12, 1.0]} />
+        <meshLambertMaterial color="#ef8f6a" flatShading />
+      </mesh>
+      {/* 枕头 */}
+      <mesh position={[-0.75, 0.56, 0]}>
+        <boxGeometry args={[0.3, 0.18, 0.7]} />
+        <meshLambertMaterial color="#fff4e6" flatShading />
+      </mesh>
+    </group>
+  );
+}
+
+const FURN_COLORS: Record<string, string> = {
+  table: "#a9743f", chair: "#a9743f", chime: "#ffd1a8", lamp: "#ffe08a",
+  stone: "#a8a49b", pot: "#6fd3c7", feather: "#e7d3b0", clock: "#bfe3ff",
+  warmstone: "#ff9d6a", piano: "#2b2b33",
+};
+
+function FurnitureBlock({ fid, index }: { fid: string; index: number }) {
+  const color = FURN_COLORS[fid] ?? "#c8956a";
+  const x = 2.0;
+  const z = Math.min(-1.4 + index * 0.5, 1.5);
+  return (
+    <mesh position={[x, 0.35, z]} castShadow>
+      <boxGeometry args={[0.5, 0.7, 0.5]} />
+      <meshLambertMaterial color={color} flatShading />
+    </mesh>
+  );
+}
+
+function HouseInterior({
+  houseFurniture,
+  onVendingMachine,
+  onBed,
+}: {
+  houseFurniture: (string | null)[];
+  onVendingMachine: () => void;
+  onBed: () => void;
+}) {
+  const W = 5.2;
+  const D = 4.0;
+  return (
+    <group>
+      {/* 地板 */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} receiveShadow>
+        <planeGeometry args={[W, D]} />
+        <meshLambertMaterial color="#c89e6a" />
+      </mesh>
+      {/* 后墙 */}
+      <mesh position={[0, 1.4, -D / 2]} castShadow>
+        <boxGeometry args={[W, 2.8, 0.15]} />
+        <meshLambertMaterial color="#b98a5e" flatShading />
+      </mesh>
+      {/* 左墙 / 右墙 */}
+      <mesh position={[-W / 2, 1.4, 0]}>
+        <boxGeometry args={[0.15, 2.8, D]} />
+        <meshLambertMaterial color="#b0824f" flatShading />
+      </mesh>
+      <mesh position={[W / 2, 1.4, 0]}>
+        <boxGeometry args={[0.15, 2.8, D]} />
+        <meshLambertMaterial color="#b0824f" flatShading />
+      </mesh>
+      {/* 前墙（+z）留门洞 */}
+      <mesh position={[-1.7, 1.4, D / 2]}>
+        <boxGeometry args={[1.8, 2.8, 0.15]} />
+        <meshLambertMaterial color="#b98a5e" flatShading />
+      </mesh>
+      <mesh position={[1.7, 1.4, D / 2]}>
+        <boxGeometry args={[1.8, 2.8, 0.15]} />
+        <meshLambertMaterial color="#b98a5e" flatShading />
+      </mesh>
+
+      {/* 暖光 */}
+      <ambientLight intensity={0.55} color="#fff1d6" />
+      <pointLight position={[0, 2.6, 0.2]} intensity={2.2} distance={9} color="#ffd9a0" />
+
+      <VendingMachine onVending={onVendingMachine} />
+      <Bed onBed={onBed} />
+
+      {/* 已摆放家具 */}
+      {houseFurniture.map((fid, i) => (fid ? <FurnitureBlock key={i} fid={fid} index={i} /> : null))}
+
+      {/* 屋内主角（站在门口，面向售卖机） */}
+      <group position={[0.6, 0, 1.2]} rotation={[0, Math.PI, 0]}>
+        <PlayerModel />
+      </group>
+    </group>
+  );
+}
+
+// ---- 相机：户外跟随主角；进屋时平滑飞到屋内，正对售卖机 ----
+function CameraRig({ world, houseView }: { world: World; houseView: boolean }) {
+  const target = useRef(new THREE.Vector3()).current;
+  const wantPos = useRef(new THREE.Vector3()).current;
+
   useFrame((state) => {
     const cam = state.camera as THREE.PerspectiveCamera;
-    const px = MAP_W / 2;
-    const pz = MAP_H / 2;
-    cam.position.set(px, 19, pz + 16);
-    cam.lookAt(px, 0, pz);
+    if (houseView) {
+      target.set(0, 1.25, -0.25);
+      wantPos.set(0, 3.0, 4.4);
+    } else {
+      const px = world.player.x / TILE;
+      const pz = world.player.y / TILE;
+      target.set(px, 1.0, pz);
+      wantPos.set(px, 8, pz + 11);
+      wantPos.x = THREE.MathUtils.clamp(wantPos.x, 3, MAP_W - 3);
+      wantPos.z = THREE.MathUtils.clamp(wantPos.z, 3, MAP_H + 11);
+    }
+    cam.position.lerp(wantPos, 0.08);
+    cam.lookAt(target);
   });
   return null;
 }
 
 // ---- 场景主体 ----
 
-function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, playerDirRef }: SceneProps) {
+function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, playerDirRef, houseView, houseFurniture, onVendingMachine, onBed }: SceneProps) {
   const dirRef = useRef<THREE.DirectionalLight>(null);
   const bgColor = useRef(new THREE.Color()).current;
   const fogRef = useRef(new THREE.Fog(0x88b8e0, 20, 55)).current;
@@ -398,6 +618,14 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
   }, []);
 
   useFrame((state) => {
+    if (houseView) {
+      bgColor.setRGB(0.28, 0.22, 0.18);
+      if (state.scene) {
+        state.scene.background = bgColor;
+        state.scene.fog = null;
+      }
+      return;
+    }
     const p = (timeRef.current % DAY_CYCLE) / DAY_CYCLE;
     const [r, g, b] = skyColor(p, weatherRef.current);
     bgColor.setRGB(r, g, b);
@@ -451,13 +679,17 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
   const riverRocks = useMemo(() => {
     const rnd = seededRandom(9917);
     const arr: { x: number; z: number; sx: number; sz: number }[] = [];
-    for (let i = 0; i < 8; i++) arr.push({ x: 19.5 + (rnd() - 0.5) * 0.8, z: 2 + rnd() * (MAP_H - 4), sx: 0.2 + rnd() * 0.3, sz: 0.16 + rnd() * 0.2 });
+    for (let i = 0; i < 8; i++) arr.push({ x: RIVER_X + (rnd() - 0.5) * 0.8, z: 2 + rnd() * (MAP_H - 4), sx: 0.2 + rnd() * 0.3, sz: 0.16 + rnd() * 0.2 });
     return arr;
   }, []);
 
   return (
     <>
-      <CameraRig />
+      <CameraRig world={world} houseView={houseView} />
+      {houseView ? (
+        <HouseInterior houseFurniture={houseFurniture} onVendingMachine={onVendingMachine} onBed={onBed} />
+      ) : (
+        <>
       <ambientLight intensity={0.42} color="#fff7e6" />
       <hemisphereLight intensity={0.3} color="#cfeaff" groundColor="#4c8c46" />
       <directionalLight
@@ -492,8 +724,8 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
       ))}
 
       {/* 河 */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[19.5, 0.02, MAP_H / 2]} receiveShadow>
-        <planeGeometry args={[1.3, MAP_H]} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[RIVER_X, 0.02, MAP_H / 2]} receiveShadow>
+        <planeGeometry args={[1.3, MAP_H - 6]} />
         <meshLambertMaterial color="#3f9bd0" emissive="#0e3a52" emissiveIntensity={0.35} />
       </mesh>
       {riverRocks.map((r, i) => (
@@ -513,7 +745,7 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
       {grass.map((g, i) => (
         <GrassTuft key={`g-${i}`} x={g.x} z={g.z} hue={g.hue} />
       ))}
-      <Hut x={3.5} z={2.5} />
+      <Hut x={HUT_CENTER.x} z={HUT_CENTER.z} />
       <Rock x={12.8} z={11} />
       <Rock x={17.2} z={6.5} />
 
@@ -532,6 +764,8 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
       <Fireflies timeRef={timeRef} />
       <Butterflies timeRef={timeRef} weatherRef={weatherRef} />
       <Rain timeRef={timeRef} weatherRef={weatherRef} />
+        </>
+      )}
     </>
   );
 }
