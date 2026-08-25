@@ -371,12 +371,24 @@ function Rain({ timeRef, weatherRef }: { timeRef: { current: number }; weatherRe
   );
 }
 
+// ---- 相机：固定俯视三分视角，逐帧保证框住整个森林 ----
+function CameraRig() {
+  useFrame((state) => {
+    const cam = state.camera as THREE.PerspectiveCamera;
+    const px = MAP_W / 2;
+    const pz = MAP_H / 2;
+    cam.position.set(px, 19, pz + 16);
+    cam.lookAt(px, 0, pz);
+  });
+  return null;
+}
+
 // ---- 场景主体 ----
 
 function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, playerDirRef }: SceneProps) {
   const dirRef = useRef<THREE.DirectionalLight>(null);
   const bgColor = useRef(new THREE.Color()).current;
-  const fogRef = useRef(new THREE.Fog(0x88b8e0, 10, 30)).current;
+  const fogRef = useRef(new THREE.Fog(0x88b8e0, 20, 55)).current;
 
   useEffect(() => {
     if (dirRef.current) {
@@ -396,7 +408,7 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
     }
     if (dirRef.current) {
       const day = p < 0.78;
-      dirRef.current.intensity = day ? 1.05 : 0.4;
+      dirRef.current.intensity = day ? 0.95 : 0.32;
       dirRef.current.color.set(day ? "#fff3dd" : "#ffb27a");
     }
   });
@@ -445,8 +457,9 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
 
   return (
     <>
-      <ambientLight intensity={0.55} color="#fff7e6" />
-      <hemisphereLight intensity={0.45} color="#cfeaff" groundColor="#4c8c46" />
+      <CameraRig />
+      <ambientLight intensity={0.42} color="#fff7e6" />
+      <hemisphereLight intensity={0.3} color="#cfeaff" groundColor="#4c8c46" />
       <directionalLight
         ref={dirRef}
         position={[15, 24, 3]}
@@ -526,10 +539,9 @@ function SceneInner({ world, timeRef, weatherRef, mysteryRef, worldVersion, play
 export function ForestScene3D(props: SceneProps) {
   return (
     <Canvas
-      camera={{ position: [MAP_W / 2, 24, MAP_H / 2 + 21], fov: 45, near: 0.1, far: 200 }}
+      camera={{ position: [MAP_W / 2, 19, MAP_H / 2 + 16], fov: 48, near: 0.1, far: 200 }}
       shadows
       dpr={[1, 1.5]}
-      onCreated={({ camera }) => camera.lookAt(MAP_W / 2, 0, MAP_H / 2)}
       style={{ width: "100%", height: "100%" }}
       gl={{ antialias: true }}
     >
