@@ -63,9 +63,12 @@ function seededRandom(seed: number) {
 const TREE_GREENS = ["#3fa34d", "#4caf50", "#66bb6a", "#2f8f46"];
 
 function Tree({ x, z, seed }: { x: number; z: number; seed: number }) {
-  const rnd = useMemo(() => seededRandom(seed), [seed]);
-  const s = 0.8 + rnd() * 0.5;
-  const col = TREE_GREENS[Math.floor(rnd() * TREE_GREENS.length)];
+  const { s, col } = useMemo(() => {
+    const rnd = seededRandom(seed);
+    const s = 0.8 + rnd() * 0.5;
+    const col = TREE_GREENS[Math.floor(rnd() * TREE_GREENS.length)];
+    return { s, col };
+  }, [seed]);
   return (
     <group position={[x, 0, z]} scale={[s, s, s]}>
       <mesh position={[0, 0.45, 0]} castShadow>
@@ -85,8 +88,10 @@ function Tree({ x, z, seed }: { x: number; z: number; seed: number }) {
 }
 
 function Bush({ x, z }: { x: number; z: number }) {
-  const rnd = useMemo(() => seededRandom(Math.floor(x * 31 + z * 7)), [x, z]);
-  const s = 0.7 + rnd() * 0.5;
+  const s = useMemo(() => {
+    const rnd = seededRandom(Math.floor(x * 31 + z * 7));
+    return 0.7 + rnd() * 0.5;
+  }, [x, z]);
   return (
     <group position={[x, 0, z]} scale={[s, s, s]}>
       <mesh position={[0, 0.3, 0]} castShadow>
@@ -121,9 +126,12 @@ function Stump({ x, z }: { x: number; z: number }) {
 }
 
 function SmallRock({ x, z }: { x: number; z: number }) {
-  const rnd = useMemo(() => seededRandom(Math.floor(x * 53 + z * 11)), [x, z]);
-  const s = 0.5 + rnd() * 0.4;
-  const col = rnd() < 0.5 ? "#a8a49b" : "#8f9aa3";
+  const { s, col } = useMemo(() => {
+    const rnd = seededRandom(Math.floor(x * 53 + z * 11));
+    const s = 0.5 + rnd() * 0.4;
+    const col = rnd() < 0.5 ? "#a8a49b" : "#8f9aa3";
+    return { s, col };
+  }, [x, z]);
   return (
     <mesh position={[x, 0.12 * s, z]} scale={[s, 0.7 * s, s]} castShadow>
       <dodecahedronGeometry args={[0.32, 0]} />
