@@ -163,3 +163,25 @@ export function removeItem(world: World, item: WorldItem): void {
   const idx = world.items.indexOf(item);
   if (idx >= 0) world.items.splice(idx, 1);
 }
+
+/** 在可走瓦片上生成一个物品。成功返回 true。 */
+export function addItemAt(world: World, itemId: string, tx: number, ty: number): boolean {
+  if (!isWalkableTile(tileAt(world, tx, ty))) return false;
+  world.items.push({ x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2, itemId });
+  return true;
+}
+
+/** 物品归属的"类别"，用于森林记忆。 */
+export const CATEGORY: Record<string, string> = {
+  stick: "wood",
+  leaf: "wood",
+  pinecone: "wood",
+  glow_branch: "wood",
+  mushroom: "mushroom",
+  blue_mushroom: "mushroom",
+  stone: "stone",
+  moon_stone: "stone",
+  flower: "flower",
+  strange_feather: "feather",
+  strange_seed: "seed",
+};
